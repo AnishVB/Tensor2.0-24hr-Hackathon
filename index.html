@@ -4,7 +4,12 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, user-scalable=no"
+      content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0a0a1a" />
+    <meta
+      name="description"
+      content="WiFi Vision AR - Visualize WiFi signal strength in augmented reality"
     />
     <title>WiFi Vision AR</title>
     <link rel="stylesheet" href="style.css" />
@@ -14,16 +19,38 @@
     />
   </head>
   <body>
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+      <div class="loader">
+        <div class="loader-ring"></div>
+        <div class="loader-ring"></div>
+        <div class="loader-ring"></div>
+        <span class="loader-text">INITIALIZING</span>
+      </div>
+      <p class="loader-status">Acquiring GPS & Camera...</p>
+    </div>
+
     <div class="main-container">
+      <!-- Hero Section -->
+      <header class="hero">
+        <div class="hero-icon">📡</div>
+        <h1 class="hero-title">Wi-Fi Vision</h1>
+        <p class="hero-tagline">
+          Map your signal strength in augmented reality
+        </p>
+      </header>
+
       <div class="ar-section">
         <video id="camera-viewport" autoplay playsinline muted></video>
 
         <div id="ar-overlay">
+          <!-- Agent Navigation Arrow -->
           <div id="guide-arrow" class="guide-arrow" style="display: none">
             ⬆
           </div>
           <div id="guide-text" class="guide-text"></div>
 
+          <!-- HUD Stats Panel -->
           <div class="stats-display">
             <div class="stat-row">
               <span class="stat-key">Signal</span>
@@ -35,20 +62,27 @@
             </div>
           </div>
 
+          <!-- AR Signal Markers Container -->
           <div id="signal-boxes"></div>
         </div>
 
+        <!-- Control Buttons -->
         <div class="control-panel">
-          <button id="drop-pin-btn" class="btn btn-primary">📍 PIN</button>
-          <button id="clear-pins-btn" class="btn btn-danger">🗑️ RESET</button>
+          <button id="drop-pin-btn" class="btn btn-primary">
+            <span>📍</span> Drop Pin
+          </button>
+          <button id="clear-pins-btn" class="btn btn-danger">
+            <span>🗑️</span> Reset
+          </button>
         </div>
       </div>
 
+      <!-- Map Section -->
       <div class="map-section">
         <div id="map"></div>
         <div class="location-info">
-          <span>Pins: <b id="pin-count">0</b></span>
-          <span>Acc: <b id="accuracy">--</b>m</span>
+          <span>📍 Pins: <b id="pin-count">0</b></span>
+          <span>📡 Accuracy: <b id="accuracy">--</b>m</span>
         </div>
       </div>
     </div>
