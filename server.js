@@ -54,29 +54,25 @@ app.get("/api/ping", async (req, res) => {
 
 // Get real WiFi statistics
 async function getRealWiFiStats() {
-  try {
-    // For Windows - get WiFi interface info
-    const { stdout } = await execAsync("netsh wlan show interfaces");
-    const connectionInfo = parseWiFiInterface(stdout);
+  // For Windows - get WiFi interface info
+  const { stdout } = await execAsync("netsh wlan show interfaces");
+  const connectionInfo = parseWiFiInterface(stdout);
 
-    // Get latency
-    const latency = await pingHost("8.8.8.8");
+  // Get latency
+  const latency = await pingHost("8.8.8.8");
 
-    // Estimate bandwidth from signal strength
-    const signal = connectionInfo.signal || -70;
-    const bandwidth = estimateBandwidth(signal);
+  // Estimate bandwidth from signal strength
+  const signal = connectionInfo.signal || -70;
+  const bandwidth = estimateBandwidth(signal);
 
-    return {
-      bandwidth: bandwidth.toFixed(1),
-      latency: Math.round(latency),
-      signal: signal,
-      connection: connectionInfo.ssid || "Unknown",
-      quality: connectionInfo.quality || 0,
-      timestamp: new Date().toISOString(),
-    };
-  } catch (error) {
-    return getDefaultStats();
-  }
+  return {
+    bandwidth: bandwidth.toFixed(1),
+    latency: Math.round(latency),
+    signal: signal,
+    connection: connectionInfo.ssid || "Unknown",
+    quality: connectionInfo.quality || 0,
+    timestamp: new Date().toISOString(),
+  };
 }
 
 // Parse WiFi interface output from netsh command
@@ -147,15 +143,10 @@ function parseNetworks(output) {
 
 // Ping a host to get latency
 async function pingHost(host) {
-  try {
-    const start = Date.now();
-    await execAsync(`ping -n 1 ${host}`, { timeout: 5000 });
-    const latency = Date.now() - start;
-    return latency;
-  } catch (error) {
-    // Fallback latency
-    return Math.random() * 50 + 10;
-  }
+  const start = Date.now();
+  await execAsync(`ping -n 1 ${host}`, { timeout: 5000 });
+  const latency = Date.now() - start;
+  return latency;
 }
 
 // Estimate bandwidth from signal strength (simplified model)
@@ -167,18 +158,6 @@ function estimateBandwidth(signal) {
   if (signal > -70) return Math.random() * 30 + 50; // Fair signal: 50-80 Mbps
   if (signal > -80) return Math.random() * 20 + 20; // Weak signal: 20-40 Mbps
   return Math.random() * 10 + 5; // Very weak: 5-15 Mbps
-}
-
-// Fallback stats
-function getDefaultStats() {
-  return {
-    bandwidth: (Math.random() * 100 + 20).toFixed(1),
-    latency: Math.floor(Math.random() * 50 + 10),
-    signal: Math.floor(Math.random() * -30 - 50),
-    connection: "WiFi",
-    quality: Math.floor(Math.random() * 100),
-    timestamp: new Date().toISOString(),
-  };
 }
 
 const PORT = process.env.PORT || 3000;

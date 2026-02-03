@@ -13,18 +13,115 @@ let heatmapLayer = null;
 let heatmapVisible = false;
 let userMarker = null;
 let pinMarkers = [];
+let lastTrackingLocation = null;
+let autoTrackingReadings = [];
+const TRACKING_DISTANCE_THRESHOLD = 3; // meters
 
-// AR Pin class for 3D positioning
-class ARPin {
-  constructor(lat, lon, signal, timestamp) {
-    this.lat = lat;
-    this.lon = lon;
-    this.signal = signal;
-    this.timestamp = timestamp;
-    this.id = Math.random().toString(36).substr(2, 9);
-    this.stats = getCurrentNetworkStats();
+// Calculate distance between two coordinates (in meters)
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371000; // Earth's radius in meters
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c; // Distance in meters
+};
+
+// Auto-save network data at location
+const autoTrackNetworkData = async () => {
+  if (!userLocation) return;
+
+  // Check if we've moved 3m+ from last tracking point
+  if (lastTrackingLocation) {
+    const distance = calculateDistance(
+      lastTrackingLocation.lat,
+      lastTrackingLocation.lon,
+      userLocation.lat,
+      userLocation.lon,
+    );
+
+    if (distance < TRACKING_DISTANCE_THRESHOLD) {
+      return; // Not far enough yet
+    }
   }
-}
+
+  try {
+    const stats = await getCurrentNetworkStats();
+
+    // Save to backend
+    await fetch("http://localhost:5000/api/save-reading", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        lat: userLocation.lat,
+        lon: userLocation.lon,
+        signal: stats.signal,
+        bandwidth: stats.bandwidth,
+        latency: stats.latency,
+        connection: stats.connection,
+        quality: stats.quality,
+      }),
+    });
+
+    // Add to local tracking array
+    const reading = {
+      lat: userLocation.lat,
+      lon: userLocation.lon,
+      signal: stats.signal,
+      bandwidth: stats.bandwidth,
+      latency: stats.latency,
+      connection: stats.connection,
+      quality: stats.quality,
+      timestamp: new Date().toLocaleTimeString(),
+    };
+
+    autoTrackingReadings.push(reading);
+    lastTrackingLocation = {
+      lat: userLocation.lat,
+      lon: userLocation.lon,
+    };
+
+    // Update tracked count display
+    document.getElementById("tracked-count").textContent =
+      autoTrackingReadings.length;
+
+    // Add marker to map
+    if (map) {
+      const signalColor = getSignalColor(stats.signal);
+      L.circleMarker([userLocation.lat, userLocation.lon], {
+        radius: 6,
+        fillColor: signalColor,
+        color: "#fff",
+        weight: 1,
+        opacity: 1,
+        fillOpacity: 0.8,
+      })
+        .bindPopup(
+          `<strong>Auto-tracked Point</strong><br/>Signal: ${stats.signal} dBm<br/>Quality: ${stats.quality}%<br/>${reading.timestamp}`,
+        )
+        .addTo(map);
+    }
+
+    console.log(`Auto-tracked: ${autoTrackingReadings.length} points recorded`);
+  } catch (error) {
+    console.warn("Auto-tracking error:", error);
+  }
+};
+
+// Get color based on signal strength
+const getSignalColor = (signal) => {
+  if (signal > -50) return "#00ff00"; // Green (strong)
+  if (signal > -60) return "#ffff00"; // Yellow (good)
+  if (signal > -70) return "#ff8800"; // Orange (fair)
+  if (signal > -80) return "#ff4400"; // Red-orange (weak)
+  return "#ff0000"; // Red (very weak)
+};
 
 // Start camera stream
 const startCamera = async () => {
@@ -53,31 +150,19 @@ const startCamera = async () => {
 
 // Get network statistics from server
 const getCurrentNetworkStats = async () => {
-  try {
-    const response = await fetch("http://localhost:3000/api/wifi-stats");
-    if (!response.ok) throw new Error("Server error");
-    const stats = await response.json();
-    return {
-      bandwidth: stats.bandwidth,
-      latency: stats.latency,
-      signal: stats.signal,
-      connection: stats.connection,
-      quality: stats.quality || 0,
-      timestamp: stats.timestamp,
-    };
-  } catch (error) {
-    console.warn("Could not fetch real WiFi stats:", error);
-    // Fallback to simulated stats
-    return {
-      bandwidth: (Math.random() * 100 + 20).toFixed(1),
-      latency: Math.floor(Math.random() * 50 + 10),
-      signal: Math.floor(Math.random() * -30 - 50),
-      connection: ["WiFi 6", "WiFi 5", "4G LTE", "5G"][
-        Math.floor(Math.random() * 4)
-      ],
-      quality: Math.floor(Math.random() * 100),
-    };
+  const response = await fetch("http://localhost:5000/api/wifi-stats");
+  if (!response.ok) {
+    throw new Error("Server error");
   }
+  const stats = await response.json();
+  return {
+    bandwidth: stats.bandwidth,
+    latency: stats.latency,
+    signal: stats.signal,
+    connection: stats.connection,
+    quality: stats.quality || 0,
+    timestamp: stats.timestamp,
+  };
 };
 
 // Get user location using Geolocation API
@@ -117,6 +202,8 @@ const startLocationTracking = () => {
         map.setView([userLocation.lat, userLocation.lon], 18);
       }
 
+      // Auto-track network data every 3m
+      autoTrackNetworkData();
       updateHeatmap();
     },
     (error) => {
@@ -137,8 +224,16 @@ const dropPin = async () => {
     return;
   }
 
-  // Get real WiFi stats from server
-  const stats = await getCurrentNetworkStats();
+  let stats;
+  try {
+    // Get real WiFi stats from server
+    stats = await getCurrentNetworkStats();
+  } catch (error) {
+    console.warn("Could not fetch real WiFi stats:", error);
+    updateNetworkStatsFailure();
+    alert("Network stats fetch failed. Pin not dropped.");
+    return;
+  }
 
   const pin = new ARPin(
     userLocation.lat,
@@ -201,6 +296,13 @@ const updateNetworkStats = (stats) => {
   document.getElementById("latency").textContent = stats.latency + " ms";
   document.getElementById("signal").textContent = stats.signal + " dBm";
   document.getElementById("connection").textContent = stats.connection;
+};
+
+const updateNetworkStatsFailure = () => {
+  document.getElementById("bandwidth").textContent = "Failed";
+  document.getElementById("latency").textContent = "Failed";
+  document.getElementById("signal").textContent = "Failed";
+  document.getElementById("connection").textContent = "Failed";
 };
 
 // Clear all pins

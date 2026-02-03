@@ -20,12 +20,12 @@
           <div id="heatmap-overlay"></div>
         </div>
         <div class="control-panel">
-          <button id="drop-pin-btn" class="btn btn-primary">📍 Drop Pin</button>
+          <button id="drop-pin-btn" class="btn btn-primary">Drop Pin</button>
           <button id="clear-pins-btn" class="btn btn-danger">
-            🗑️ Clear All
+            Clear All Pins
           </button>
           <button id="toggle-heatmap-btn" class="btn btn-secondary">
-            🔥 Toggle Heatmap
+            Toggle Heatmap
           </button>
         </div>
         <div class="network-stats-card">
@@ -46,6 +46,19 @@
             <div class="stat-item">
               <span class="stat-label">Connection</span>
               <span class="stat-value" id="connection">--</span>
+            </div>
+          </div>
+        </div>
+        <div class="network-stats-card">
+          <h3>Auto-Tracking</h3>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <span class="stat-label">Tracked Points</span>
+              <span class="stat-value" id="tracked-count">0</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Distance</span>
+              <span class="stat-value" id="distance-traveled">0 m</span>
             </div>
           </div>
         </div>
