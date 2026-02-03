@@ -110,17 +110,23 @@ const init = async () => {
 // Upload a reading to the cloud
 const syncToCloud = async (pin) => {
   const sb = getSupabase();
-  if (!sb) return; // Supabase not loaded yet
+  if (!sb) {
+    console.warn("Sync skipped: Supabase not ready");
+    return;
+  }
+
+  const payload = {
+    lat: pin.lat,
+    lon: pin.lon,
+    signal: pin.signal,
+    latency: pin.latency || 0,
+    type: pin.type || "WiFi", // Upload type
+    provider: pin.provider || "Unknown", // Upload ISP
+  };
+  console.log("Attempting Upload:", payload);
 
   try {
-    const { error } = await sb.from("wifi_readings").insert({
-      lat: pin.lat,
-      lon: pin.lon,
-      signal: pin.signal,
-      latency: pin.latency || 0,
-      type: pin.type || "WiFi", // Upload type
-      provider: pin.provider || "Unknown", // Upload ISP
-    });
+    const { error } = await sb.from("wifi_readings").insert(payload);
 
     if (error) {
       console.error("Cloud sync error:", error);
@@ -145,9 +151,14 @@ const fetchNearbyReadings = async () => {
       (111 * Math.cos((smoothedLocation.lat * Math.PI) / 180));
 
     // Debug: Log the bounding box
-    console.log(
-      `fetching nearby readings: lat=${smoothedLocation.lat}, lon=${smoothedLocation.lon}`,
-    );
+    console.log("Fetching Query:", {
+      lat: smoothedLocation.lat,
+      lon: smoothedLocation.lon,
+      minLat: smoothedLocation.lat - latDelta,
+      maxLat: smoothedLocation.lat + latDelta,
+      minLon: smoothedLocation.lon - lonDelta,
+      maxLon: smoothedLocation.lon + lonDelta,
+    });
 
     // Select ALL columns to prevent errors if specific columns are missing
     const { data, error } = await sb
