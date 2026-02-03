@@ -1,17 +1,64 @@
 // WiFi Vision AR - Cross-Platform Network Mapping
 
+// Supabase Configuration
+const SUPABASE_URL = "https://dimipsvkjuyctqeohkri.supabase.co";
+const SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRpbWlwc3ZranV5Y3RxZW9oa3JpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAxMjE1NjAsImV4cCI6MjA4NTY5NzU2MH0._JpbddtuHlvN9_gxF_gzevPn53A10Idp2y0eg6lvq2U";
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 // State
-let pins = []; // { lat, lon, signal, latency, timestamp }
+let pins = []; // Local pins (for AR rendering)
+let cloudPins = []; // All pins from cloud (for heatmap)
 let userLocation = null; // { lat, lon, accuracy }
+let smoothedLocation = null; // Kalman-filtered location
+let lastAutoPinLocation = null; // Last location where we auto-dropped a pin
 let deviceHeading = 0; // Compass heading (0-360)
 let currentStats = { signal: -100, latency: 999 };
+let lastCloudSync = 0; // Timestamp of last cloud sync
 
 // Track existing signal box elements by pin index (for AR rendering)
 const signalBoxElements = new Map();
 
 // Constants
 const FOV = 60; // Approximate phone camera horizontal Field of View
-const MAX_Render_DIST = 50; // Only show pins within 50 meters
+const MAX_Render_DIST = 100; // Show pins within 100 meters
+const AUTO_PIN_DISTANCE = 3; // Auto-drop pin every 3 meters
+const MIN_ACCURACY_FOR_PIN = 20; // Only auto-drop if accuracy < 20m
+const CLOUD_SYNC_INTERVAL = 10000; // Sync cloud data every 10 seconds
+const NEARBY_RADIUS_KM = 1; // Fetch readings within 1km
+
+// Kalman Filter for GPS smoothing
+class GPSKalmanFilter {
+  constructor() {
+    this.lat = null;
+    this.lon = null;
+    this.variance = -1; // Negative means uninitialized
+    this.minAccuracy = 1; // Minimum accuracy in meters
+  }
+
+  process(lat, lon, accuracy) {
+    if (accuracy < this.minAccuracy) accuracy = this.minAccuracy;
+
+    if (this.variance < 0) {
+      // First reading
+      this.lat = lat;
+      this.lon = lon;
+      this.variance = accuracy * accuracy;
+    } else {
+      // Kalman gain
+      const k = this.variance / (this.variance + accuracy * accuracy);
+
+      // Update estimates
+      this.lat += k * (lat - this.lat);
+      this.lon += k * (lon - this.lon);
+      this.variance = (1 - k) * this.variance;
+    }
+
+    return { lat: this.lat, lon: this.lon, variance: Math.sqrt(this.variance) };
+  }
+}
+
+const gpsFilter = new GPSKalmanFilter();
 
 // DOM Elements
 const signalBoxContainer = document.getElementById("signal-boxes");
@@ -34,6 +81,113 @@ const init = async () => {
   setInterval(updateNetworkStats, 2000); // Ping every 2s
   setInterval(renderAR, 50); // High FPS AR loop
   setInterval(updateAgentGuide, 1000); // Agent logic every 1s
+  setInterval(syncCloudData, CLOUD_SYNC_INTERVAL); // Sync cloud data periodically
+
+  // Initial cloud sync after a short delay (wait for GPS)
+  setTimeout(syncCloudData, 3000);
+};
+
+// --- Cloud Sync Functions ---
+
+// Upload a reading to the cloud
+const syncToCloud = async (pin) => {
+  try {
+    const { error } = await supabase.from("wifi_readings").insert({
+      lat: pin.lat,
+      lon: pin.lon,
+      signal: pin.signal,
+      latency: pin.latency || 0,
+    });
+
+    if (error) {
+      console.error("Cloud sync error:", error);
+    } else {
+      console.log("📡 Synced to cloud");
+    }
+  } catch (e) {
+    console.error("Cloud sync failed:", e);
+  }
+};
+
+// Fetch nearby readings from all users
+const fetchNearbyReadings = async () => {
+  if (!smoothedLocation) return [];
+
+  try {
+    // Calculate bounding box for nearby readings
+    const latDelta = NEARBY_RADIUS_KM / 111; // ~111km per degree latitude
+    const lonDelta =
+      NEARBY_RADIUS_KM /
+      (111 * Math.cos((smoothedLocation.lat * Math.PI) / 180));
+
+    const { data, error } = await supabase
+      .from("wifi_readings")
+      .select("lat, lon, signal, latency, created_at")
+      .gte("lat", smoothedLocation.lat - latDelta)
+      .lte("lat", smoothedLocation.lat + latDelta)
+      .gte("lon", smoothedLocation.lon - lonDelta)
+      .lte("lon", smoothedLocation.lon + lonDelta)
+      .order("created_at", { ascending: false })
+      .limit(500);
+
+    if (error) {
+      console.error("Fetch error:", error);
+      return [];
+    }
+
+    return data || [];
+  } catch (e) {
+    console.error("Fetch failed:", e);
+    return [];
+  }
+};
+
+// Periodic sync - fetch community data and update heatmap
+const syncCloudData = async () => {
+  const readings = await fetchNearbyReadings();
+
+  const cloudStatus = document.getElementById("cloud-status");
+
+  if (readings.length > 0) {
+    cloudPins = readings.map((r) => ({
+      lat: r.lat,
+      lon: r.lon,
+      signal: r.signal,
+      latency: r.latency,
+    }));
+
+    // Update heatmap with cloud data
+    updateHeatmapWithCloudData();
+    lastCloudSync = Date.now();
+    cloudStatus.textContent = `${readings.length} nearby`;
+    cloudStatus.style.color = "#22c55e";
+    console.log(`☁️ Synced ${readings.length} community readings`);
+  } else {
+    cloudStatus.textContent = "No data";
+    cloudStatus.style.color = "#94a3b8";
+  }
+};
+
+// Update heatmap to include cloud data
+const updateHeatmapWithCloudData = () => {
+  if (!heatLayer || !map) return;
+
+  // Combine local and cloud pins for heatmap
+  const allPins = [...pins, ...cloudPins];
+
+  const heatData = allPins.map((pin) => [
+    pin.lat,
+    pin.lon,
+    signalToIntensity(pin.signal),
+  ]);
+
+  heatLayer.setLatLngs(heatData);
+
+  // Update community pin count
+  const totalCount = new Set(
+    allPins.map((p) => `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`),
+  ).size;
+  document.getElementById("pin-count").textContent = totalCount;
 };
 
 const loadPins = () => {
@@ -152,14 +306,14 @@ const updateNetworkStats = async () => {
 };
 
 const dropPin = () => {
-  if (!userLocation) {
+  if (!smoothedLocation) {
     alert("Wait for GPS lock...");
     return;
   }
 
   const newPin = {
-    lat: userLocation.lat,
-    lon: userLocation.lon,
+    lat: smoothedLocation.lat,
+    lon: smoothedLocation.lon,
     signal: currentStats.signal,
     latency: currentStats.latency,
     timestamp: Date.now(),
@@ -169,37 +323,50 @@ const dropPin = () => {
   savePins();
   addMarkerToMap(newPin);
   document.getElementById("pin-count").textContent = pins.length;
+
+  // Sync to cloud for other users to see
+  syncToCloud(newPin);
+
+  // Update last auto-pin location to prevent immediate auto-drop
+  lastAutoPinLocation = {
+    lat: smoothedLocation.lat,
+    lon: smoothedLocation.lon,
+  };
 };
 
 const clearPins = () => {
   if (confirm("Clear all data?")) {
     pins = [];
     savePins();
-    // Clear Map
+    // Clear Map markers
     map.eachLayer((layer) => {
       if (layer instanceof L.CircleMarker) map.removeLayer(layer);
     });
     // Re-add user marker
     if (userMarker) userMarker.addTo(map);
+    // Clear heatmap
+    if (heatLayer) heatLayer.setLatLngs([]);
     document.getElementById("pin-count").textContent = 0;
     // Clear AR signal boxes
     signalBoxContainer.innerHTML = "";
     signalBoxElements.clear();
+    // Reset auto-pin tracking
+    lastAutoPinLocation = null;
   }
 };
 
 // --- 3. Spatial AR Logic (The "Locking") ---
 
 const renderAR = () => {
-  if (!userLocation) return;
+  if (!smoothedLocation) return;
 
   const visiblePins = new Set();
 
   pins.forEach((pin, index) => {
-    // 1. Calculate Distance
+    // 1. Calculate Distance using smoothed location
     const dist = getDistanceFromLatLonInM(
-      userLocation.lat,
-      userLocation.lon,
+      smoothedLocation.lat,
+      smoothedLocation.lon,
       pin.lat,
       pin.lon,
     );
@@ -207,8 +374,8 @@ const renderAR = () => {
 
     // 2. Calculate Bearing (Angle to pin relative to North)
     const bearing = getBearing(
-      userLocation.lat,
-      userLocation.lon,
+      smoothedLocation.lat,
+      smoothedLocation.lon,
       pin.lat,
       pin.lon,
     );
@@ -268,7 +435,7 @@ const renderAR = () => {
 // --- 4. Agentic Navigation (The "Direction") ---
 
 const updateAgentGuide = () => {
-  if (pins.length < 2) {
+  if (pins.length < 2 || !smoothedLocation) {
     guideArrow.style.display = "none";
     guideText.textContent = "";
     return;
@@ -282,8 +449,8 @@ const updateAgentGuide = () => {
   // If current signal is much worse than best pin (> 5dB difference)
   if (currentStats.signal < bestPin.signal - 5) {
     const bearingToBest = getBearing(
-      userLocation.lat,
-      userLocation.lon,
+      smoothedLocation.lat,
+      smoothedLocation.lon,
       bestPin.lat,
       bestPin.lon,
     );
@@ -300,34 +467,137 @@ const updateAgentGuide = () => {
 
 // --- 5. Sensors & Math Helpers ---
 
+// Auto-drop a pin at current location
+const autoDropPin = () => {
+  if (!smoothedLocation) return;
+
+  const newPin = {
+    lat: smoothedLocation.lat,
+    lon: smoothedLocation.lon,
+    signal: currentStats.signal,
+    latency: currentStats.latency,
+    timestamp: Date.now(),
+    auto: true, // Mark as auto-dropped
+  };
+
+  pins.push(newPin);
+  savePins();
+  addMarkerToMap(newPin);
+  document.getElementById("pin-count").textContent = pins.length;
+
+  // Sync to cloud for other users to see
+  syncToCloud(newPin);
+
+  // Update last auto-pin location
+  lastAutoPinLocation = {
+    lat: smoothedLocation.lat,
+    lon: smoothedLocation.lon,
+  };
+};
+
+// Check if we should auto-drop a pin
+const checkAutoDrop = () => {
+  const autoStatus = document.getElementById("auto-status");
+
+  if (!smoothedLocation) {
+    autoStatus.textContent = "WAIT";
+    autoStatus.style.color = "#f59e0b";
+    return;
+  }
+
+  if (userLocation.accuracy > MIN_ACCURACY_FOR_PIN) {
+    // Skip if accuracy is poor
+    autoStatus.textContent = "LOW ACC";
+    autoStatus.style.color = "#ef4444";
+    return;
+  }
+
+  autoStatus.textContent = "ON";
+  autoStatus.style.color = "#22c55e";
+
+  if (!lastAutoPinLocation) {
+    // First pin
+    autoDropPin();
+    return;
+  }
+
+  // Calculate distance from last auto-pin
+  const dist = getDistanceFromLatLonInM(
+    lastAutoPinLocation.lat,
+    lastAutoPinLocation.lon,
+    smoothedLocation.lat,
+    smoothedLocation.lon,
+  );
+
+  if (dist >= AUTO_PIN_DISTANCE) {
+    autoDropPin();
+  }
+};
+
 const startLocationTracking = () => {
   navigator.geolocation.watchPosition(
     (pos) => {
+      const rawLat = pos.coords.latitude;
+      const rawLon = pos.coords.longitude;
+      const accuracy = pos.coords.accuracy;
+
+      // Apply Kalman filter for smoothing
+      const filtered = gpsFilter.process(rawLat, rawLon, accuracy);
+
+      // Store raw location
       userLocation = {
-        lat: pos.coords.latitude,
-        lon: pos.coords.longitude,
-        accuracy: pos.coords.accuracy,
+        lat: rawLat,
+        lon: rawLon,
+        accuracy: accuracy,
       };
-      document.getElementById("accuracy").textContent = Math.round(
-        userLocation.accuracy,
-      );
+
+      // Use smoothed location for AR
+      smoothedLocation = {
+        lat: filtered.lat,
+        lon: filtered.lon,
+        accuracy: filtered.variance,
+      };
+
+      // Update accuracy display with color coding
+      const accDisplay = document.getElementById("accuracy");
+      accDisplay.textContent = Math.round(accuracy);
+      if (accuracy <= 5) {
+        accDisplay.style.color = "#22c55e"; // Green - excellent
+      } else if (accuracy <= 15) {
+        accDisplay.style.color = "#f59e0b"; // Amber - okay
+      } else {
+        accDisplay.style.color = "#ef4444"; // Red - poor
+      }
 
       if (userMarker && map) {
         // Add marker to map if not already added
         if (!map.hasLayer(userMarker)) {
           userMarker.addTo(map);
         }
-        userMarker.setLatLng([userLocation.lat, userLocation.lon]);
+        // Use smoothed location for marker
+        userMarker.setLatLng([smoothedLocation.lat, smoothedLocation.lon]);
 
         // Auto-zoom to user location on first GPS fix
         if (!hasZoomedToUser) {
-          map.setView([userLocation.lat, userLocation.lon], 17);
+          map.setView([smoothedLocation.lat, smoothedLocation.lon], 18); // Zoom level 18 for street detail
           hasZoomedToUser = true;
         }
       }
+
+      // Check if we should auto-drop a pin
+      checkAutoDrop();
     },
-    (err) => console.error("GPS Error", err),
-    { enableHighAccuracy: true, maximumAge: 0 },
+    (err) => {
+      console.error("GPS Error", err);
+      // Show error to user
+      document.getElementById("accuracy").textContent = "ERR";
+      document.getElementById("accuracy").style.color = "#ef4444";
+    },
+    {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 10000,
+    },
   );
 };
 
@@ -411,7 +681,7 @@ const startCamera = async () => {
   }
 };
 
-let map, userMarker;
+let map, userMarker, heatLayer;
 let hasZoomedToUser = false; // Track if we've zoomed to user location
 
 const initMap = () => {
@@ -437,22 +707,70 @@ const initMap = () => {
     weight: 2,
   });
   // Don't add to map yet - will add when we have location
+
+  // Initialize empty heatmap layer
+  heatLayer = L.heatLayer([], {
+    radius: 25,
+    blur: 15,
+    maxZoom: 18,
+    max: 1.0,
+    gradient: {
+      0.0: "#ff3366", // Bad signal - red
+      0.25: "#ff6600", // Poor - orange
+      0.5: "#ffaa00", // Medium - amber
+      0.75: "#7fff00", // Good - lime
+      1.0: "#00ff88", // Excellent - mint
+    },
+  }).addTo(map);
+};
+
+// Convert signal dBm to heatmap intensity (0-1)
+const signalToIntensity = (dbm) => {
+  // -90 dBm = 0 (worst), -40 dBm = 1 (best)
+  const normalized = (dbm + 90) / 50;
+  return Math.max(0, Math.min(1, normalized));
+};
+
+// Update heatmap with current pins
+const updateHeatmap = () => {
+  if (!heatLayer || !map) return;
+
+  const heatData = pins.map((pin) => [
+    pin.lat,
+    pin.lon,
+    signalToIntensity(pin.signal),
+  ]);
+
+  heatLayer.setLatLngs(heatData);
 };
 
 const addMarkerToMap = (pin) => {
   if (!map) return;
   L.circleMarker([pin.lat, pin.lon], {
-    radius: 6,
+    radius: 4,
     fillColor: getSignalColor(pin.signal),
     color: "#fff",
     weight: 1,
-    fillOpacity: 0.8,
+    fillOpacity: 0.9,
   }).addTo(map);
+
+  // Update heatmap
+  updateHeatmap();
 };
 
 const updateMapMarkers = () => {
   if (!map) return;
-  pins.forEach(addMarkerToMap);
+  pins.forEach((pin) => {
+    L.circleMarker([pin.lat, pin.lon], {
+      radius: 4,
+      fillColor: getSignalColor(pin.signal),
+      color: "#fff",
+      weight: 1,
+      fillOpacity: 0.9,
+    }).addTo(map);
+  });
+  // Update heatmap with all pins
+  updateHeatmap();
 };
 
 // Event Listeners

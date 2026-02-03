@@ -49,10 +49,12 @@
 
 body {
   font-family: var(--font-body);
-  overflow: hidden;
   background: #0f172a;
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Main Container */

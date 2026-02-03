@@ -17,6 +17,7 @@
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
     />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   </head>
   <body>
     <!-- Loading Overlay -->
@@ -81,13 +82,15 @@
       <div class="map-section">
         <div id="map"></div>
         <div class="location-info">
-          <span>📍 Pins: <b id="pin-count">0</b></span>
-          <span>📡 Accuracy: <b id="accuracy">--</b>m</span>
+          <span>📍 Readings: <b id="pin-count">0</b></span>
+          <span>📡 Acc: <b id="accuracy">--</b>m</span>
+          <span>☁️ <b id="cloud-status">Syncing...</b></span>
         </div>
       </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
     <script src="main.js"></script>
   </body>
 </html>
