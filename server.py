@@ -180,7 +180,7 @@ def parse_wifi_interface(output):
     result = {'ssid': 'Unknown', 'signal': -70, 'quality': 0}
     
     for line in lines:
-        if 'SSID' in line and ':' in line:
+        if 'SSID' in line and 'BSSID' not in line and ':' in line:
             match = line.split(':', 1)[1].strip()
             if match:
                 result['ssid'] = match

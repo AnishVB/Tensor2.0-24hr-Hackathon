@@ -22,7 +22,6 @@ let pins = []; // Local pins (for AR rendering)
 let cloudPins = []; // All pins from cloud (for heatmap)
 let userLocation = null; // { lat, lon, accuracy }
 let smoothedLocation = null; // Kalman-filtered location
-let lastAutoPinLocation = null; // Last location where we auto-dropped a pin
 let deviceHeading = 0; // Compass heading (0-360)
 let currentStats = { signal: -100, latency: 999, provider: "Unknown" };
 let lastCloudSync = 0; // Timestamp of last cloud sync
@@ -34,8 +33,6 @@ const signalBoxElements = new Map();
 // Constants
 const FOV = 80; // Approximate phone camera horizontal Field of View
 const MAX_Render_DIST = 100; // Show pins within 100 meters
-const AUTO_PIN_DISTANCE = 3; // Auto-drop pin every 3 meters
-const MIN_ACCURACY_FOR_PIN = 20; // Only auto-drop if accuracy < 20m
 const CLOUD_SYNC_INTERVAL = 10000; // Sync cloud data every 10 seconds
 const NEARBY_RADIUS_KM = 1; // Fetch readings within 1km
 
@@ -120,21 +117,27 @@ const syncToCloud = async (pin) => {
     lon: pin.lon,
     signal: pin.signal,
     latency: pin.latency || 0,
-    type: pin.type || "WiFi", // Upload type
+    bandwidth: pin.bandwidth || 0,
+    quality: pin.quality || 0,
+    type: pin.connection || "WiFi", // Use connection as cloud 'type'
     provider: pin.provider || "Unknown", // Upload ISP
   };
-  console.log("Attempting Upload:", payload);
+  console.log("Attempting Upload to Supabase:", payload);
 
   try {
-    const { error } = await sb.from("wifi_readings").insert(payload);
+    const { data, error } = await sb.from("wifi_readings").insert(payload);
 
     if (error) {
-      console.error("Cloud sync error:", error);
+      console.error(
+        "Cloud sync error (Supabase):",
+        error.message,
+        error.details,
+      );
     } else {
-      console.log("📡 Synced to cloud");
+      console.log("📡 Synced to cloud (Supabase)");
     }
   } catch (e) {
-    console.error("Cloud sync failed:", e);
+    console.error("Cloud sync exception:", e);
   }
 };
 
@@ -342,22 +345,37 @@ const estimateSignalFromConnection = () => {
 
 const updateNetworkStats = async () => {
   try {
-    // Get connection info (works on all platforms)
-    const connInfo = estimateSignalFromConnection();
-
-    // Measure real latency
-    const latency = await measureLatency();
-
-    // Preserve provider if already fetched
-    const existingProvider = currentStats.provider || "Unknown";
-
-    currentStats = {
-      signal: connInfo.signal,
-      latency: latency || connInfo.rtt || 50,
-      connection: connInfo.type,
-      effectiveType: connInfo.effectiveType,
-      provider: existingProvider,
-    };
+    // 1. Try to get real stats from Local Python Server first
+    try {
+      const resp = await fetch("http://localhost:5000/api/wifi-stats");
+      if (resp.ok) {
+        const stats = await resp.json();
+        currentStats = {
+          signal: stats.signal,
+          latency: stats.latency,
+          connection: stats.connection,
+          provider: currentStats.provider || "Unknown",
+          bandwidth: stats.bandwidth,
+          quality: stats.quality,
+        };
+        console.log("Real WiFi stats acquired from Local Server");
+      } else {
+        throw new Error("Local server unresponsive");
+      }
+    } catch (localErr) {
+      // 2. Fallback to Browser Estimation (for mobile or if server is down)
+      const connInfo = estimateSignalFromConnection();
+      const latency = (await measureLatency()) || connInfo.rtt || 50;
+      currentStats = {
+        signal: connInfo.signal,
+        latency: latency,
+        connection: connInfo.type,
+        effectiveType: connInfo.effectiveType,
+        provider: currentStats.provider || "Unknown",
+        bandwidth: 50.0, // Default estimate
+        quality: 75, // Default estimate
+      };
+    }
 
     // Update HUD
     document.getElementById("overlay-signal").textContent =
@@ -373,7 +391,7 @@ const updateNetworkStats = async () => {
   }
 };
 
-const dropPin = () => {
+const dropPin = async () => {
   if (!smoothedLocation) {
     alert("Wait for GPS lock...");
     return;
@@ -384,9 +402,11 @@ const dropPin = () => {
     lon: smoothedLocation.lon,
     signal: currentStats.signal,
     latency: currentStats.latency,
-    type: currentStats.connection, // WiFi or Cellular
+    bandwidth: currentStats.bandwidth || 0,
+    quality: currentStats.quality || 0,
+    connection: currentStats.connection, // WiFi or Cellular
     provider: currentStats.provider, // ISP Name
-    timestamp: Date.now(),
+    timestamp: new Date().toISOString(),
   };
 
   pins.push(newPin);
@@ -394,14 +414,20 @@ const dropPin = () => {
   addMarkerToMap(newPin);
   document.getElementById("pin-count").textContent = pins.length;
 
-  // Sync to cloud for other users to see
+  // 1. Sync to cloud (Supabase)
   syncToCloud(newPin);
 
-  // Update last auto-pin location to prevent immediate auto-drop
-  lastAutoPinLocation = {
-    lat: smoothedLocation.lat,
-    lon: smoothedLocation.lon,
-  };
+  // 2. Sync to local database (Python Server)
+  try {
+    await fetch("http://localhost:5000/api/save-reading", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(newPin),
+    });
+    console.log("📡 Synced to local database");
+  } catch (e) {
+    console.warn("Local sync failed (Is server.py running?)", e);
+  }
 };
 
 const clearPins = () => {
@@ -428,9 +454,6 @@ const clearPins = () => {
     // Clear AR signal boxes
     signalBoxContainer.innerHTML = "";
     signalBoxElements.clear();
-
-    // Reset auto-pin tracking
-    lastAutoPinLocation = null;
   }
 };
 
@@ -551,75 +574,6 @@ const updateAgentGuide = () => {
 
 // --- 5. Sensors & Math Helpers ---
 
-// Auto-drop a pin at current location
-const autoDropPin = () => {
-  if (!smoothedLocation) return;
-
-  const newPin = {
-    lat: smoothedLocation.lat,
-    lon: smoothedLocation.lon,
-    signal: currentStats.signal,
-    latency: currentStats.latency,
-    type: currentStats.connection, // WiFi or Cellular
-    provider: currentStats.provider, // ISP Name
-    timestamp: Date.now(),
-    auto: true, // Mark as auto-dropped
-  };
-
-  pins.push(newPin);
-  savePins();
-  addMarkerToMap(newPin);
-  document.getElementById("pin-count").textContent = pins.length;
-
-  // Sync to cloud for other users to see
-  syncToCloud(newPin);
-
-  // Update last auto-pin location
-  lastAutoPinLocation = {
-    lat: smoothedLocation.lat,
-    lon: smoothedLocation.lon,
-  };
-};
-
-// Check if we should auto-drop a pin
-const checkAutoDrop = () => {
-  const autoStatus = document.getElementById("auto-status");
-
-  if (!smoothedLocation) {
-    autoStatus.textContent = "WAIT";
-    autoStatus.style.color = "#f59e0b";
-    return;
-  }
-
-  if (userLocation.accuracy > MIN_ACCURACY_FOR_PIN) {
-    // Skip if accuracy is poor
-    autoStatus.textContent = "LOW ACC";
-    autoStatus.style.color = "#ef4444";
-    return;
-  }
-
-  autoStatus.textContent = "ON";
-  autoStatus.style.color = "#22c55e";
-
-  if (!lastAutoPinLocation) {
-    // First pin
-    autoDropPin();
-    return;
-  }
-
-  // Calculate distance from last auto-pin
-  const dist = getDistanceFromLatLonInM(
-    lastAutoPinLocation.lat,
-    lastAutoPinLocation.lon,
-    smoothedLocation.lat,
-    smoothedLocation.lon,
-  );
-
-  if (dist >= AUTO_PIN_DISTANCE) {
-    autoDropPin();
-  }
-};
-
 const startLocationTracking = () => {
   navigator.geolocation.watchPosition(
     (pos) => {
@@ -669,9 +623,6 @@ const startLocationTracking = () => {
           hasZoomedToUser = true;
         }
       }
-
-      // Check if we should auto-drop a pin
-      checkAutoDrop();
     },
     (err) => {
       console.error("GPS Error", err);
