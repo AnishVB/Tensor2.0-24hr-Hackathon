@@ -1,21 +1,34 @@
 // AR Camera and Pin System
 const videoEl = document.getElementById("camera-viewport");
 const arOverlay = document.getElementById("ar-overlay");
-const heatmapOverlay = document.getElementById("heatmap-overlay");
+const signalBoxesContainer = document.getElementById("signal-boxes");
 const dropPinBtn = document.getElementById("drop-pin-btn");
 const clearPinsBtn = document.getElementById("clear-pins-btn");
-const toggleHeatmapBtn = document.getElementById("toggle-heatmap-btn");
+const toggleMapBtn = document.getElementById("toggle-map-btn");
+const toggleCameraBtn = document.getElementById("toggle-camera-btn");
+const mapSection = document.querySelector(".map-section");
 
 let pins = [];
 let userLocation = null;
 let map = null;
-let heatmapLayer = null;
-let heatmapVisible = false;
 let userMarker = null;
 let pinMarkers = [];
 let lastTrackingLocation = null;
 let autoTrackingReadings = [];
+let currentStream = null;
+let cameraFacingMode = "environment"; // 'user' or 'environment'
 const TRACKING_DISTANCE_THRESHOLD = 3; // meters
+
+// ARPin class
+class ARPin {
+  constructor(lat, lon, signal, timestamp) {
+    this.lat = lat;
+    this.lon = lon;
+    this.signal = signal;
+    this.timestamp = timestamp;
+    this.stats = {};
+  }
+}
 
 // Calculate distance between two coordinates (in meters)
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -123,31 +136,6 @@ const getSignalColor = (signal) => {
   return "#ff0000"; // Red (very weak)
 };
 
-// Start camera stream
-const startCamera = async () => {
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    console.error("Camera API not supported");
-    return;
-  }
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: { ideal: 640 },
-        height: { ideal: 480 },
-        facingMode: "environment",
-      },
-      audio: false,
-    });
-
-    videoEl.srcObject = stream;
-    await videoEl.play();
-  } catch (error) {
-    console.error("Camera access denied:", error);
-    alert("Camera access required for AR mode");
-  }
-};
-
 // Get network statistics from server
 const getCurrentNetworkStats = async () => {
   const response = await fetch("http://localhost:5000/api/wifi-stats");
@@ -160,7 +148,7 @@ const getCurrentNetworkStats = async () => {
     latency: stats.latency,
     signal: stats.signal,
     connection: stats.connection,
-    quality: stats.quality || 0,
+    quality: stats.quality || Math.round((stats.signal + 100) * 1.5),
     timestamp: stats.timestamp,
   };
 };
@@ -204,7 +192,6 @@ const startLocationTracking = () => {
 
       // Auto-track network data every 3m
       autoTrackNetworkData();
-      updateHeatmap();
     },
     (error) => {
       console.error("Location error:", error);
@@ -249,18 +236,19 @@ const dropPin = async () => {
 
   // Add to map
   if (map) {
-    const marker = L.marker([pin.lat, pin.lon], {
-      icon: L.icon({
-        iconUrl:
-          "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSIxNiIgY3k9IjEwIiByPSI2IiBmaWxsPSIjZmYzMzY2Ii8+PHBhdGggZD0iTTE2IDEwTDEzIDI0SDE5TDE2IDEwWiIgZmlsbD0iI2ZmMzM2NiIvPjwvc3ZnPg==",
-        iconSize: [32, 32],
-        popupAnchor: [0, -16],
-      }),
+    const signalColor = getSignalColor(stats.signal);
+    const marker = L.circleMarker([pin.lat, pin.lon], {
+      radius: 8,
+      fillColor: signalColor,
+      color: "#fff",
+      weight: 2,
+      opacity: 1,
+      fillOpacity: 0.8,
     })
       .bindPopup(
         `
       <div class="popup-content">
-        <h4>Pin - ${pin.timestamp}</h4>
+        <h4>Pin #${pins.length} - ${pin.timestamp}</h4>
         <p>Signal: ${pin.stats.signal} dBm</p>
         <p>Quality: ${pin.stats.quality}%</p>
         <p>Latency: ${pin.stats.latency} ms</p>
@@ -274,20 +262,15 @@ const dropPin = async () => {
     pinMarkers.push(marker);
   }
 
-  // Add to AR overlay
-  const pinEl = document.createElement("div");
-  pinEl.className = "ar-pin";
-  pinEl.innerHTML = `
-    <div class="pin-core"></div>
-    <div class="pin-label">${pins.length}</div>
-  `;
-  arOverlay.appendChild(pinEl);
-
   // Update pin count
   document.getElementById("pin-count").textContent = pins.length;
 
   // Update network stats
   updateNetworkStats(pin.stats);
+  updateOverlayStats(pin.stats);
+
+  // Render signal boxes
+  renderSignalBoxes();
 };
 
 // Update network stats display
@@ -305,6 +288,53 @@ const updateNetworkStatsFailure = () => {
   document.getElementById("connection").textContent = "Failed";
 };
 
+// Update stats display in overlay (fixed position)
+const updateOverlayStats = (stats) => {
+  document.getElementById("overlay-signal").textContent = stats.signal + " dBm";
+  document.getElementById("overlay-latency").textContent =
+    stats.latency + " ms";
+  document.getElementById("overlay-bandwidth").textContent =
+    stats.bandwidth + " Mbps";
+  document.getElementById("overlay-quality").textContent =
+    (stats.quality || Math.round((stats.signal + 100) * 1.5)) + "%";
+};
+
+// Render signal boxes in AR (colored based on signal strength)
+const renderSignalBoxes = () => {
+  signalBoxesContainer.innerHTML = "";
+
+  if (pins.length === 0) return;
+
+  pins.forEach((pin, index) => {
+    const box = document.createElement("div");
+    box.className = "signal-box";
+
+    const signalColor = getSignalColor(pin.stats.signal);
+    const signalQuality =
+      pin.stats.quality || Math.round((pin.stats.signal + 100) * 1.5);
+
+    box.style.backgroundColor = signalColor;
+    box.style.borderColor = signalColor;
+
+    box.innerHTML = `
+      <div class="box-label">#${index + 1}</div>
+      <div class="box-stats">
+        <div class="box-stat">📶 ${pin.stats.signal} dBm</div>
+        <div class="box-stat">⚡ ${signalQuality}%</div>
+        <div class="box-stat">⏱️ ${pin.stats.latency} ms</div>
+      </div>
+    `;
+
+    // Random position in AR view (but fixed - doesn't move)
+    const x = (index % 2) * 50 + 10; // Spread them horizontally
+    const y = Math.floor(index / 2) * 45 + 10; // Stack vertically
+    box.style.left = x + "%";
+    box.style.top = y + "%";
+
+    signalBoxesContainer.appendChild(box);
+  });
+};
+
 // Clear all pins
 const clearAllPins = () => {
   if (pins.length === 0) {
@@ -317,7 +347,7 @@ const clearAllPins = () => {
   }
 
   pins = [];
-  arOverlay.innerHTML = "";
+  signalBoxesContainer.innerHTML = "";
   pinMarkers.forEach((marker) => map.removeLayer(marker));
   pinMarkers = [];
 
@@ -326,8 +356,6 @@ const clearAllPins = () => {
   document.getElementById("latency").textContent = "-- ms";
   document.getElementById("signal").textContent = "-- dBm";
   document.getElementById("connection").textContent = "--";
-
-  updateHeatmap();
 };
 
 // Initialize map
@@ -341,76 +369,94 @@ const initMap = () => {
   }).addTo(map);
 };
 
-// Update heatmap
-const updateHeatmap = () => {
-  if (!heatmapVisible || !map || pins.length === 0) {
-    if (heatmapLayer) {
-      map.removeLayer(heatmapLayer);
-    }
+// Start camera stream
+const startCamera = async (facing = "environment") => {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    console.error("Camera API not supported");
     return;
   }
 
-  // Prepare heatmap data
-  const heatData = pins.map((pin) => {
-    // Normalize signal strength to 0-1 for heatmap intensity
-    const intensity = Math.abs(pin.signal) / 100;
-    return [pin.lat, pin.lon, intensity];
-  });
-
-  // Remove old heatmap
-  if (heatmapLayer) {
-    map.removeLayer(heatmapLayer);
+  // Stop previous stream
+  if (currentStream) {
+    currentStream.getTracks().forEach((track) => track.stop());
   }
 
-  // Create new heatmap
-  heatmapLayer = L.heatLayer(heatData, {
-    radius: 25,
-    blur: 15,
-    maxZoom: 1,
-    gradient: {
-      0.4: "blue",
-      0.65: "lime",
-      0.8: "yellow",
-      1.0: "red",
-    },
-  }).addTo(map);
+  try {
+    const constraints = {
+      video: {
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        facingMode: facing,
+      },
+      audio: false,
+    };
+
+    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+    videoEl.srcObject = currentStream;
+    cameraFacingMode = facing;
+    updateCameraButtonState();
+  } catch (error) {
+    console.error("Camera access denied:", error);
+    // Fallback to other facing mode
+    const fallbackFacing = facing === "user" ? "environment" : "user";
+    try {
+      const fallbackStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: fallbackFacing },
+        audio: false,
+      });
+      currentStream = fallbackStream;
+      videoEl.srcObject = fallbackStream;
+      cameraFacingMode = fallbackFacing;
+      updateCameraButtonState();
+    } catch (fallbackError) {
+      alert("Camera access required for AR mode");
+    }
+  }
 };
 
-// Toggle heatmap visibility
-const toggleHeatmap = () => {
-  heatmapVisible = !heatmapVisible;
-  toggleHeatmapBtn.classList.toggle("active", heatmapVisible);
-  updateHeatmap();
+// Switch camera
+const switchCamera = async () => {
+  const newFacing = cameraFacingMode === "user" ? "environment" : "user";
+  await startCamera(newFacing);
 };
 
-// Animate pins in AR overlay
-const animateARPins = () => {
-  const pinElements = arOverlay.querySelectorAll(".ar-pin");
-  pinElements.forEach((el, index) => {
-    // Rotate pins
-    el.style.transform = `rotate(${(index * 360) / pinElements.length}deg)`;
-    // Pulse effect
-    el.style.animation = `pulse 2s ease-in-out infinite`;
-    el.style.animationDelay = `${index * 0.1}s`;
-  });
+const updateCameraButtonState = () => {
+  const label = cameraFacingMode === "user" ? "📱" : "📷";
+  toggleCameraBtn.textContent = label;
+};
+
+// Toggle map visibility
+const toggleMap = () => {
+  mapSection.classList.toggle("hidden");
 };
 
 // Event listeners
 dropPinBtn.addEventListener("click", dropPin);
 clearPinsBtn.addEventListener("click", clearAllPins);
-toggleHeatmapBtn.addEventListener("click", toggleHeatmap);
+toggleMapBtn.addEventListener("click", toggleMap);
+toggleCameraBtn.addEventListener("click", switchCamera);
 
 // Initialize
 startCamera();
 initMap();
 startLocationTracking();
 
-// Update network stats periodically
-setInterval(() => {
+// Hide map on mobile by default
+if (window.innerWidth < 1024) {
+  mapSection.classList.add("hidden");
+}
+
+// Update network stats and AR overlay periodically
+setInterval(async () => {
   if (pins.length > 0) {
     updateNetworkStats(pins[pins.length - 1].stats);
+    updateOverlayStats(pins[pins.length - 1].stats);
+  } else {
+    try {
+      const stats = await getCurrentNetworkStats();
+      updateOverlayStats(stats);
+    } catch (e) {
+      // Silent fail
+    }
   }
-}, 2000);
-
-// Animate AR pins
-setInterval(animateARPins, 100);
+}, 1000);

@@ -2,7 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
     <title>WiFi Vision AR</title>
     <link rel="stylesheet" href="style.css" />
     <link
@@ -13,23 +21,52 @@
   <body>
     <div class="main-container">
       <div class="ar-section">
-        <h1>WiFi Vision AR</h1>
+        <div class="header">
+          <h1>WiFi Vision AR</h1>
+          <button
+            id="toggle-camera-btn"
+            class="camera-toggle-btn"
+            title="Switch Camera"
+          >
+            <span class="camera-icon">📷</span>
+          </button>
+        </div>
+
         <div class="viewport-container">
-          <video id="camera-viewport" autoplay playsinline></video>
-          <div id="ar-overlay"></div>
-          <div id="heatmap-overlay"></div>
+          <video id="camera-viewport" autoplay playsinline muted></video>
+          <div id="ar-overlay">
+            <div class="data-overlay">
+              <div id="stats-display" class="stats-display">
+                <div class="stat-row">
+                  <span class="stat-key">Signal:</span>
+                  <span class="stat-val" id="overlay-signal">--</span>
+                </div>
+                <div class="stat-row">
+                  <span class="stat-key">Latency:</span>
+                  <span class="stat-val" id="overlay-latency">--</span>
+                </div>
+                <div class="stat-row">
+                  <span class="stat-key">Bandwidth:</span>
+                  <span class="stat-val" id="overlay-bandwidth">--</span>
+                </div>
+                <div class="stat-row">
+                  <span class="stat-key">Quality:</span>
+                  <span class="stat-val" id="overlay-quality">--</span>
+                </div>
+              </div>
+              <div id="signal-boxes"></div>
+            </div>
+          </div>
         </div>
+
         <div class="control-panel">
-          <button id="drop-pin-btn" class="btn btn-primary">Drop Pin</button>
-          <button id="clear-pins-btn" class="btn btn-danger">
-            Clear All Pins
-          </button>
-          <button id="toggle-heatmap-btn" class="btn btn-secondary">
-            Toggle Heatmap
-          </button>
+          <button id="drop-pin-btn" class="btn btn-primary">📍 Pin</button>
+          <button id="clear-pins-btn" class="btn btn-danger">🗑️ Clear</button>
+          <button id="toggle-map-btn" class="btn btn-secondary">🗺️ Map</button>
         </div>
+
         <div class="network-stats-card">
-          <h3>Network Stats</h3>
+          <h3>Current Stats</h3>
           <div class="stats-grid">
             <div class="stat-item">
               <span class="stat-label">Bandwidth</span>
@@ -49,11 +86,12 @@
             </div>
           </div>
         </div>
+
         <div class="network-stats-card">
           <h3>Auto-Tracking</h3>
           <div class="stats-grid">
             <div class="stat-item">
-              <span class="stat-label">Tracked Points</span>
+              <span class="stat-label">Tracked</span>
               <span class="stat-value" id="tracked-count">0</span>
             </div>
             <div class="stat-item">
@@ -71,11 +109,11 @@
         </div>
         <div class="location-info">
           <div class="info-item">
-            <span class="info-label">Latitude:</span>
+            <span class="info-label">Lat:</span>
             <span class="info-value" id="lat">--</span>
           </div>
           <div class="info-item">
-            <span class="info-label">Longitude:</span>
+            <span class="info-label">Lon:</span>
             <span class="info-value" id="lon">--</span>
           </div>
           <div class="info-item">
@@ -83,7 +121,7 @@
             <span class="info-value" id="accuracy">--</span>
           </div>
           <div class="info-item">
-            <span class="info-label">Pins Placed:</span>
+            <span class="info-label">Pins:</span>
             <span class="info-value" id="pin-count">0</span>
           </div>
         </div>
