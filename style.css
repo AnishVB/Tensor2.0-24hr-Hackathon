@@ -429,13 +429,18 @@ h2 {
 
 /* Tablet and small devices */
 @media (max-width: 1024px) {
+  .main-container {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
   .viewport-container {
     max-width: 100%;
     aspect-ratio: 16 / 9;
   }
 
   #map-container {
-    height: 300px;
+    height: 350px;
   }
 
   .control-panel {
@@ -570,7 +575,7 @@ h2 {
   }
 
   #map-container {
-    height: 200px;
+    height: 280px;
     border-width: 1px;
   }
 
@@ -645,7 +650,7 @@ h2 {
   }
 
   #map-container {
-    height: 150px;
+    height: 220px;
   }
 
   .location-info {

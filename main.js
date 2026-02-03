@@ -557,9 +557,9 @@ const updateCameraButtonState = () => {
   toggleCameraBtn.textContent = label;
 };
 
-// Toggle map visibility
+// Toggle map visibility (disabled - map is always visible)
 const toggleMap = () => {
-  mapSection.classList.toggle("hidden");
+  // Map is now always visible on all screen sizes
 };
 
 // Event listeners
