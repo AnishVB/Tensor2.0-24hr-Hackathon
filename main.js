@@ -449,10 +449,7 @@ const renderAR = () => {
     );
 
     // 3. Calculate Relative Angle (Where is it relative to phone camera?)
-    let relativeAngle = bearing - deviceHeading;
-    // Normalize to -180 to 180
-    while (relativeAngle < -180) relativeAngle += 360;
-    while (relativeAngle > 180) relativeAngle -= 360;
+    let relativeAngle = getShortestAngleDiff(bearing, deviceHeading);
 
     // 4. Check if in FOV (Is it on screen?)
     if (Math.abs(relativeAngle) < FOV / 2) {
@@ -481,9 +478,11 @@ const renderAR = () => {
       // Standard perspective: things get smaller as they get further
       const scale = Math.max(0.4, 1 - (dist / MAX_Render_DIST) * 0.8);
 
-      // Vertical position: simple horizon line for stability
-      // Since we don't track phone tilt (pitch), we keep them at eye-level horizon
-      el.style.top = `50%`;
+      // Vertical position: Dynamic horizon
+      // If perpendicular (90deg), horizon is 50%
+      // Each degree of tilt shifts horizon by ~1.5% of screen height
+      const tiltOffset = (deviceTilt - 90) * 1.5;
+      el.style.top = `${50 + tiltOffset}%`;
 
       el.style.transform = `translate(-50%, -50%) scale(${scale})`;
       el.style.zIndex = Math.floor(100 - dist);
@@ -702,7 +701,24 @@ const startCompass = () => {
     }
 
     // Simple smoothing could be added here if needed
-    deviceHeading = heading;
+    // Apply Low-Pass Filter (Smoothing)
+    // 0.8 = Very snappy (almost instant), 0.1 = Very floaty
+    const smoothFactor = 0.8;
+    if (Math.abs(getShortestAngleDiff(heading, deviceHeading)) > 1) {
+      deviceHeading = lerpAngle(deviceHeading, heading, smoothFactor);
+      // Keep in 0-360 range
+      deviceHeading = (deviceHeading + 360) % 360;
+    }
+
+    // Capture Tilt (Beta) - Upright is ~90
+    let currentTilt = e.beta || 90;
+    // Constrain tilt to reasonable holding angles (45 to 135)
+    currentTilt = Math.max(45, Math.min(135, currentTilt));
+
+    // Smooth Tilt
+    if (Math.abs(currentTilt - deviceTilt) > 1) {
+      deviceTilt = deviceTilt + (currentTilt - deviceTilt) * 0.1; // Slower smoothing for tilt
+    }
 
     // Update Map View Cone (Blue Triangle)
     if (map && smoothedLocation) {
@@ -748,6 +764,19 @@ const startCompass = () => {
     window.addEventListener("deviceorientation", handleOrientation);
   }
 };
+
+// Shortest distance between two angles (handles 0/360 wrap)
+function getShortestAngleDiff(target, current) {
+  let diff = (target - current) % 360;
+  if (diff > 180) diff -= 360;
+  if (diff < -180) diff += 360;
+  return diff;
+}
+
+function lerpAngle(start, end, t) {
+  const diff = getShortestAngleDiff(end, start);
+  return start + diff * t;
+}
 
 // Haversine Distance
 function getDistanceFromLatLonInM(lat1, lon1, lat2, lon2) {
@@ -815,6 +844,7 @@ const startCamera = async () => {
 
 let map, userMarker, heatLayer, markersLayer, viewCone;
 let hasZoomedToUser = false; // Track if we've zoomed to user location
+let deviceTilt = 90; // Default upright
 
 const initMap = () => {
   map = L.map("map", {
