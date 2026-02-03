@@ -4,7 +4,18 @@
 const SUPABASE_URL = "https://dimipsvkjuyctqeohkri.supabase.co";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRpbWlwc3ZranV5Y3RxZW9oa3JpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAxMjE1NjAsImV4cCI6MjA4NTY5NzU2MH0._JpbddtuHlvN9_gxF_gzevPn53A10Idp2y0eg6lvq2U";
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Lazy-load supabase client to avoid blocking errors
+let supabaseClient = null;
+const getSupabase = () => {
+  if (!supabaseClient && window.supabase) {
+    supabaseClient = window.supabase.createClient(
+      SUPABASE_URL,
+      SUPABASE_ANON_KEY,
+    );
+  }
+  return supabaseClient;
+};
 
 // State
 let pins = []; // Local pins (for AR rendering)
@@ -69,6 +80,11 @@ const loadingOverlay = document.getElementById("loading-overlay");
 // --- 1. Initialization & Persistence ---
 
 const init = async () => {
+  // Safety: hide loading after 5s no matter what
+  setTimeout(() => {
+    if (loadingOverlay) loadingOverlay.classList.add("hidden");
+  }, 5000);
+
   startCamera();
   initMap();
   loadPins(); // Load from LocalStorage
@@ -91,8 +107,11 @@ const init = async () => {
 
 // Upload a reading to the cloud
 const syncToCloud = async (pin) => {
+  const sb = getSupabase();
+  if (!sb) return; // Supabase not loaded yet
+
   try {
-    const { error } = await supabase.from("wifi_readings").insert({
+    const { error } = await sb.from("wifi_readings").insert({
       lat: pin.lat,
       lon: pin.lon,
       signal: pin.signal,
@@ -111,7 +130,8 @@ const syncToCloud = async (pin) => {
 
 // Fetch nearby readings from all users
 const fetchNearbyReadings = async () => {
-  if (!smoothedLocation) return [];
+  const sb = getSupabase();
+  if (!smoothedLocation || !sb) return [];
 
   try {
     // Calculate bounding box for nearby readings
@@ -120,7 +140,7 @@ const fetchNearbyReadings = async () => {
       NEARBY_RADIUS_KM /
       (111 * Math.cos((smoothedLocation.lat * Math.PI) / 180));
 
-    const { data, error } = await supabase
+    const { data, error } = await sb
       .from("wifi_readings")
       .select("lat, lon, signal, latency, created_at")
       .gte("lat", smoothedLocation.lat - latDelta)
