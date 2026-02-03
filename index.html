@@ -3,14 +3,82 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Camera Viewport</title>
+    <title>WiFi Vision AR</title>
     <link rel="stylesheet" href="style.css" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
   </head>
   <body>
-    <div class="container">
-      <h1>WiFi Vision</h1>
-      <video id="camera-viewport" autoplay playsinline></video>
+    <div class="main-container">
+      <div class="ar-section">
+        <h1>WiFi Vision AR</h1>
+        <div class="viewport-container">
+          <video id="camera-viewport" autoplay playsinline></video>
+          <div id="ar-overlay"></div>
+          <div id="heatmap-overlay"></div>
+        </div>
+        <div class="control-panel">
+          <button id="drop-pin-btn" class="btn btn-primary">📍 Drop Pin</button>
+          <button id="clear-pins-btn" class="btn btn-danger">
+            🗑️ Clear All
+          </button>
+          <button id="toggle-heatmap-btn" class="btn btn-secondary">
+            🔥 Toggle Heatmap
+          </button>
+        </div>
+        <div class="network-stats-card">
+          <h3>Network Stats</h3>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <span class="stat-label">Bandwidth</span>
+              <span class="stat-value" id="bandwidth">-- Mbps</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Latency</span>
+              <span class="stat-value" id="latency">-- ms</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Signal</span>
+              <span class="stat-value" id="signal">-- dBm</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Connection</span>
+              <span class="stat-value" id="connection">--</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="map-section">
+        <h2>Location Map</h2>
+        <div id="map-container">
+          <div id="map"></div>
+        </div>
+        <div class="location-info">
+          <div class="info-item">
+            <span class="info-label">Latitude:</span>
+            <span class="info-value" id="lat">--</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Longitude:</span>
+            <span class="info-value" id="lon">--</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Accuracy:</span>
+            <span class="info-value" id="accuracy">--</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Pins Placed:</span>
+            <span class="info-value" id="pin-count">0</span>
+          </div>
+        </div>
+      </div>
     </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/simplesimpleheat/dist/simpleheat.js"></script>
     <script src="main.js"></script>
   </body>
 </html>
