@@ -32,7 +32,7 @@ let currentFilter = "all"; // all, wifi, cellular
 const signalBoxElements = new Map();
 
 // Constants
-const FOV = 60; // Approximate phone camera horizontal Field of View
+const FOV = 80; // Approximate phone camera horizontal Field of View
 const MAX_Render_DIST = 100; // Show pins within 100 meters
 const AUTO_PIN_DISTANCE = 3; // Auto-drop pin every 3 meters
 const MIN_ACCURACY_FOR_PIN = 20; // Only auto-drop if accuracy < 20m
@@ -188,13 +188,14 @@ const syncCloudData = async () => {
     }));
 
     // Update heatmap with cloud data
-    updateHeatmapWithCloudData();
+    // Update heatmap with cloud data and REFRESH PROVIDER LIST
+    updateHeatmapWithCloudData(true);
     lastCloudSync = Date.now();
     cloudStatus.textContent = `${readings.length} nearby`;
     cloudStatus.style.color = "#22c55e";
     console.log(`☁️ Synced ${readings.length} community readings`);
   } else {
-    cloudStatus.textContent = "No data";
+    cloudStatus.textContent = "0 nearby";
     cloudStatus.style.color = "#94a3b8";
   }
 };
@@ -702,6 +703,42 @@ const startCompass = () => {
 
     // Simple smoothing could be added here if needed
     deviceHeading = heading;
+
+    // Update Map View Cone (Blue Triangle)
+    if (map && smoothedLocation) {
+      if (!viewCone) {
+        viewCone = L.polygon([], {
+          color: "#3b82f6",
+          fillColor: "#3b82f6",
+          fillOpacity: 0.3, // Slightly more opaque
+          stroke: false, // Remove outline
+        }).addTo(map);
+      }
+
+      // Calculate triangle points (30m distance - smaller)
+      const center = [smoothedLocation.lat, smoothedLocation.lon];
+      const dist = 30; // meters
+      const angleLeft = (heading - 40) * (Math.PI / 180);
+      const angleRight = (heading + 40) * (Math.PI / 180);
+
+      // Naive projection for short distance (sufficient)
+      // lat += dist * cos(angle) / 111111
+      // lon += dist * sin(angle) / (111111 * cos(lat))
+      const p1 = [
+        smoothedLocation.lat + (dist * Math.cos(angleLeft)) / 111111,
+        smoothedLocation.lon +
+          (dist * Math.sin(angleLeft)) /
+            (111111 * Math.cos((smoothedLocation.lat * Math.PI) / 180)),
+      ];
+      const p2 = [
+        smoothedLocation.lat + (dist * Math.cos(angleRight)) / 111111,
+        smoothedLocation.lon +
+          (dist * Math.sin(angleRight)) /
+            (111111 * Math.cos((smoothedLocation.lat * Math.PI) / 180)),
+      ];
+
+      viewCone.setLatLngs([center, p1, p2]);
+    }
   };
 
   // Try to use absolute orientation first (Chrome Android)
@@ -776,7 +813,7 @@ const startCamera = async () => {
   }
 };
 
-let map, userMarker, heatLayer, markersLayer;
+let map, userMarker, heatLayer, markersLayer, viewCone;
 let hasZoomedToUser = false; // Track if we've zoomed to user location
 
 const initMap = () => {
@@ -941,8 +978,8 @@ const addMarkerToMap = (pin) => {
     fillOpacity: 0.9,
   }).addTo(map);
 
-  // Update heatmap
-  updateHeatmap();
+  // Update heatmap and provider list
+  updateHeatmapWithCloudData(true);
 };
 
 const updateMapMarkers = () => {
@@ -956,8 +993,8 @@ const updateMapMarkers = () => {
       fillOpacity: 0.9,
     }).addTo(map);
   });
-  // Update heatmap with all pins
-  updateHeatmap();
+  // Update heatmap with all pins (Cloud + Local) and refresh info
+  updateHeatmapWithCloudData(true);
 };
 
 // Event Listeners
