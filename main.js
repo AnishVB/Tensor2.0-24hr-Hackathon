@@ -20,7 +20,12 @@ let lastTrackingLocation = null;
 let autoTrackingReadings = [];
 let currentStream = null;
 let cameraFacingMode = "environment"; // 'user' or 'environment'
+let deviceHeading = 0; // Compass direction (0-360)
+let devicePitch = 0; // Up/down tilt (-90 to 90)
+let deviceRoll = 0; // Left/right tilt (-180 to 180)
 const TRACKING_DISTANCE_THRESHOLD = 3; // meters
+const FOV_HORIZONTAL = 60; // Horizontal field of view in degrees
+const FOV_VERTICAL = 45; // Vertical field of view in degrees
 
 // ARPin class
 class ARPin {
@@ -223,6 +228,65 @@ const startLocationTracking = () => {
   );
 };
 
+// Start device orientation tracking
+const startDeviceOrientation = () => {
+  // Request permission for iOS 13+
+  if (
+    typeof DeviceOrientationEvent !== "undefined" &&
+    typeof DeviceOrientationEvent.requestPermission === "function"
+  ) {
+    DeviceOrientationEvent.requestPermission()
+      .then((permissionState) => {
+        if (permissionState === "granted") {
+          window.addEventListener("deviceorientation", handleDeviceOrientation);
+        }
+      })
+      .catch(console.error);
+  } else {
+    // Non-iOS devices
+    window.addEventListener("deviceorientation", handleDeviceOrientation);
+  }
+
+  // Also request motion for better tilt detection
+  if (
+    typeof DeviceMotionEvent !== "undefined" &&
+    typeof DeviceMotionEvent.requestPermission === "function"
+  ) {
+    DeviceMotionEvent.requestPermission()
+      .then((permissionState) => {
+        if (permissionState === "granted") {
+          window.addEventListener("devicemotion", handleDeviceMotion);
+        }
+      })
+      .catch(console.error);
+  } else {
+    window.addEventListener("devicemotion", handleDeviceMotion);
+  }
+};
+
+const handleDeviceOrientation = (event) => {
+  // alpha: Z axis rotation (-180 to 180) - Compass heading
+  // beta: X axis rotation (-90 to 90) - Up/down tilt
+  // gamma: Y axis rotation (-90 to 90) - Left/right tilt
+
+  const alpha = event.alpha || 0; // 0-360 degrees
+  const beta = event.beta || 0; // -180 to 180 degrees
+  const gamma = event.gamma || 0; // -90 to 90 degrees
+
+  // Convert alpha to compass heading (0-360)
+  deviceHeading = (alpha + 360) % 360;
+  devicePitch = beta; // Use beta for pitch
+  deviceRoll = gamma; // Use gamma for roll
+
+  // Redraw boxes whenever orientation changes
+  renderSignalBoxes();
+};
+
+const handleDeviceMotion = (event) => {
+  // Can use acceleration data for additional refinement if needed
+  // Currently using DeviceOrientation which is more reliable
+};
+
 // Drop pin at current location
 const dropPin = async () => {
   if (!userLocation) {
@@ -319,9 +383,53 @@ const updateOverlayStats = (stats) => {
 const renderSignalBoxes = () => {
   signalBoxesContainer.innerHTML = "";
 
-  if (pins.length === 0) return;
+  if (pins.length === 0 || !userLocation) return;
 
   pins.forEach((pin, index) => {
+    // Calculate bearing and distance to pin
+    const dLat = ((pin.lat - userLocation.lat) * Math.PI) / 180;
+    const dLon = ((pin.lon - userLocation.lon) * Math.PI) / 180;
+
+    const bearing = Math.atan2(
+      Math.sin(dLon) * Math.cos((pin.lat * Math.PI) / 180),
+      Math.cos((userLocation.lat * Math.PI) / 180) *
+        Math.sin((pin.lat * Math.PI) / 180) -
+        Math.sin((userLocation.lat * Math.PI) / 180) *
+          Math.cos((pin.lat * Math.PI) / 180) *
+          Math.cos(dLon),
+    );
+    let bearingDegrees = (bearing * 180) / Math.PI;
+    bearingDegrees = (bearingDegrees + 360) % 360;
+
+    // Calculate relative angle from device heading
+    let relativeAngle = bearingDegrees - deviceHeading;
+    // Normalize to -180 to 180
+    while (relativeAngle > 180) relativeAngle -= 360;
+    while (relativeAngle < -180) relativeAngle += 360;
+
+    // Check if pin is in horizontal field of view
+    if (Math.abs(relativeAngle) > FOV_HORIZONTAL / 2) {
+      return; // Pin is out of view
+    }
+
+    // Calculate distance for elevation angle (simplified)
+    const distance = calculateDistance(
+      userLocation.lat,
+      userLocation.lon,
+      pin.lat,
+      pin.lon,
+    );
+
+    // Estimate elevation angle (assuming pins are at same altitude)
+    const elevationAngle =
+      Math.atan2(0, distance) * (180 / Math.PI) - devicePitch;
+
+    // Check if pin is in vertical field of view
+    if (Math.abs(elevationAngle) > FOV_VERTICAL / 2) {
+      return; // Pin is out of view
+    }
+
+    // Pin is visible! Create box
     const box = document.createElement("div");
     box.className = "signal-box";
 
@@ -341,11 +449,19 @@ const renderSignalBoxes = () => {
       </div>
     `;
 
-    // Random position in AR view (but fixed - doesn't move)
-    const x = (index % 2) * 50 + 10; // Spread them horizontally
-    const y = Math.floor(index / 2) * 45 + 10; // Stack vertically
-    box.style.left = x + "%";
-    box.style.top = y + "%";
+    // Position based on relative angle and elevation
+    // Convert angles to screen coordinates (center of viewport)
+    const viewportWidth = videoEl.offsetWidth;
+    const viewportHeight = videoEl.offsetHeight;
+
+    // Horizontal position (-FOV/2 to +FOV/2 maps to 0 to width)
+    const xPercent = 50 + (relativeAngle / (FOV_HORIZONTAL / 2)) * 40;
+
+    // Vertical position (-FOV/2 to +FOV/2 maps to 0 to height)
+    const yPercent = 50 + (elevationAngle / (FOV_VERTICAL / 2)) * 35;
+
+    box.style.left = Math.max(5, Math.min(95, xPercent)) + "%";
+    box.style.top = Math.max(5, Math.min(95, yPercent)) + "%";
 
     signalBoxesContainer.appendChild(box);
   });
@@ -456,11 +572,9 @@ toggleCameraBtn.addEventListener("click", switchCamera);
 startCamera();
 initMap();
 startLocationTracking();
+startDeviceOrientation();
 
-// Hide map on mobile by default
-if (window.innerWidth < 1024) {
-  mapSection.classList.add("hidden");
-}
+// Map is now always visible - no hiding on mobile
 
 // Update network stats and AR overlay periodically
 setInterval(async () => {

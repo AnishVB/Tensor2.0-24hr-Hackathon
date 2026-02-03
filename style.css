@@ -33,8 +33,20 @@ body {
   gap: 0;
 }
 
-.map-section.hidden {
-  display: none;
+/* Mobile layout: vertical stack */
+@media (max-width: 1024px) {
+  .main-container {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .ar-section {
+    order: 1;
+  }
+
+  .map-section {
+    order: 2;
+  }
 }
 
 .header {
@@ -417,18 +429,13 @@ h2 {
 
 /* Tablet and small devices */
 @media (max-width: 1024px) {
-  .main-container {
-    grid-template-columns: 1fr;
-    gap: 12px;
-  }
-
   .viewport-container {
     max-width: 100%;
     aspect-ratio: 16 / 9;
   }
 
   #map-container {
-    height: 250px;
+    height: 300px;
   }
 
   .control-panel {
