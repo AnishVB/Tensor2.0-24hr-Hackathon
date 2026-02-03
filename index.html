@@ -72,7 +72,7 @@
             <span>📍</span> Drop Pin
           </button>
           <button id="clear-pins-btn" class="btn btn-danger">
-            <span>🗑️</span> Reset
+            <span>🗑️</span> Reset Pins
           </button>
         </div>
       </div>
@@ -83,8 +83,18 @@
 
         <!-- ISP Filter Controls -->
         <div class="map-controls">
+          <label
+            for="isp-filter"
+            style="
+              font-size: 10px;
+              font-weight: bold;
+              color: #64748b;
+              margin-right: 4px;
+            "
+            >Filtered Network:</label
+          >
           <select id="isp-filter" class="filter-select">
-            <option value="all">All Providers</option>
+            <option value="all">Show All Networks</option>
           </select>
         </div>
 

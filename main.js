@@ -144,9 +144,15 @@ const fetchNearbyReadings = async () => {
       NEARBY_RADIUS_KM /
       (111 * Math.cos((smoothedLocation.lat * Math.PI) / 180));
 
+    // Debug: Log the bounding box
+    console.log(
+      `fetching nearby readings: lat=${smoothedLocation.lat}, lon=${smoothedLocation.lon}`,
+    );
+
+    // Select ALL columns to prevent errors if specific columns are missing
     const { data, error } = await sb
       .from("wifi_readings")
-      .select("lat, lon, signal, latency, type, created_at")
+      .select("*")
       .gte("lat", smoothedLocation.lat - latDelta)
       .lte("lat", smoothedLocation.lat + latDelta)
       .gte("lon", smoothedLocation.lon - lonDelta)
@@ -235,9 +241,31 @@ const fetchISP = async () => {
       if (data.org) {
         console.log("ISP Detected:", data.org);
         currentStats.provider = data.org;
+
         // Update UI
         const providerEl = document.getElementById("current-provider");
         if (providerEl) providerEl.textContent = data.org;
+
+        // Auto-Switch Filter to this ISP
+        currentFilter = data.org;
+        const select = document.getElementById("isp-filter");
+        if (select) {
+          // Add option if missing
+          let found = false;
+          for (let i = 0; i < select.options.length; i++) {
+            if (select.options[i].value === data.org) found = true;
+          }
+          if (!found) {
+            const opt = document.createElement("option");
+            opt.value = data.org;
+            opt.textContent = data.org;
+            select.appendChild(opt);
+          }
+          select.value = data.org;
+
+          // Refresh heatmap with new filter
+          updateHeatmapWithCloudData(false);
+        }
       }
     }
   } catch (e) {
@@ -365,21 +393,30 @@ const dropPin = () => {
 };
 
 const clearPins = () => {
-  if (confirm("Clear all data?")) {
+  if (confirm("Remove your local pins? (Cloud data will remain)")) {
     pins = [];
     savePins();
-    // Clear Map markers
+
+    // Clear Map markers (Local + Cloud)
+    // We clear detailed markers but then restore cloud markers via updateHeatmapWithCloudData
+    if (markersLayer) markersLayer.clearLayers();
+
+    // Also remove any rogue markers added directly to map (deprecated but safe cleanup)
     map.eachLayer((layer) => {
-      if (layer instanceof L.CircleMarker) map.removeLayer(layer);
+      if (layer instanceof L.CircleMarker && layer !== userMarker)
+        map.removeLayer(layer);
     });
+
     // Re-add user marker
     if (userMarker) userMarker.addTo(map);
-    // Clear heatmap
-    if (heatLayer) heatLayer.setLatLngs([]);
-    document.getElementById("pin-count").textContent = 0;
+
+    // Refresh Map (Restores Cloud Pins & Heatmap)
+    updateHeatmapWithCloudData();
+
     // Clear AR signal boxes
     signalBoxContainer.innerHTML = "";
     signalBoxElements.clear();
+
     // Reset auto-pin tracking
     lastAutoPinLocation = null;
   }
@@ -492,7 +529,8 @@ const updateAgentGuide = () => {
     let relativeAngle = bearingToBest - deviceHeading;
 
     guideArrow.style.display = "block";
-    guideArrow.style.transform = `translate(-50%, -50%) rotate(${relativeAngle}deg)`;
+    // 3D Floor Effect: Tilt it back (rotateX) then rotate to point (rotateZ)
+    guideArrow.style.transform = `translate(-50%, -50%) perspective(500px) rotateX(60deg) rotateZ(${relativeAngle}deg)`;
     guideText.textContent = `Stronger Signal Detected (${bestPin.signal} dBm)`;
   } else {
     guideArrow.style.display = "none";
@@ -738,7 +776,7 @@ const startCamera = async () => {
   }
 };
 
-let map, userMarker, heatLayer;
+let map, userMarker, heatLayer, markersLayer;
 let hasZoomedToUser = false; // Track if we've zoomed to user location
 
 const initMap = () => {
@@ -754,6 +792,8 @@ const initMap = () => {
       attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
     },
   ).addTo(map);
+
+  markersLayer = L.layerGroup().addTo(map);
 
   // User marker - initially hidden until we get GPS
   userMarker = L.circleMarker([0, 0], {
@@ -772,11 +812,11 @@ const initMap = () => {
     maxZoom: 18,
     max: 1.0,
     gradient: {
-      0.0: "#ff3366", // Bad signal - red
-      0.25: "#ff6600", // Poor - orange
-      0.5: "#ffaa00", // Medium - amber
-      0.75: "#7fff00", // Good - lime
-      1.0: "#00ff88", // Excellent - mint
+      0.0: "red", // Bad signal - Intense Red
+      0.25: "#ff6600", // Poor - Orange
+      0.5: "#ffaa00", // Medium - Amber
+      0.75: "#7fff00", // Good - Lime
+      1.0: "#00ff88", // Excellent - Mint
     },
   }).addTo(map);
 
@@ -798,17 +838,23 @@ const updateHeatmapWithCloudData = (populateOptions = true) => {
   const allPins = [...pins, ...cloudPins];
 
   if (populateOptions) {
-    const providers = new Set(allPins.map((p) => p.provider || "Unknown"));
+    const providers = new Set(
+      allPins.map((p) =>
+        p.provider && p.provider.trim() ? p.provider : "Unknown ISP",
+      ),
+    );
     const select = document.getElementById("isp-filter");
     if (select) {
       // Keep "All Providers" and current selection
       const current = select.value;
-      select.innerHTML = '<option value="all">All Providers</option>';
+      select.innerHTML = '<option value="all">Show All Networks</option>';
 
       providers.forEach((p) => {
         const opt = document.createElement("option");
         opt.value = p;
         opt.textContent = p;
+        opt.style.color = "black";
+        opt.style.backgroundColor = "white";
         select.appendChild(opt);
       });
       select.value = current;
@@ -818,7 +864,9 @@ const updateHeatmapWithCloudData = (populateOptions = true) => {
   // Filter based on selection
   const filteredPins = allPins.filter((pin) => {
     if (currentFilter === "all") return true;
-    return (pin.provider || "Unknown") === currentFilter;
+    const pName =
+      pin.provider && pin.provider.trim() ? pin.provider : "Unknown ISP";
+    return pName === currentFilter;
   });
 
   const heatData = filteredPins.map((pin) => [
@@ -827,7 +875,34 @@ const updateHeatmapWithCloudData = (populateOptions = true) => {
     signalToIntensity(pin.signal),
   ]);
 
+  // Update Heatmap
   heatLayer.setLatLngs(heatData);
+
+  // Update Markers (Interactive Dots)
+  if (markersLayer) {
+    markersLayer.clearLayers();
+    filteredPins.forEach((pin) => {
+      const color = getSignalColor(pin.signal);
+      const marker = L.circleMarker([pin.lat, pin.lon], {
+        radius: 5,
+        fillColor: color,
+        color: "#fff",
+        weight: 1,
+        fillOpacity: 0.9,
+      }).addTo(markersLayer);
+
+      // Popup with stats
+      marker.bindPopup(`
+        <div style="font-size:12px; font-family:sans-serif;">
+          <strong>${pin.provider || "Unknown Provider"}</strong><br/>
+          Signal: <span style="color:${color}; font-weight:bold">${pin.signal} dBm</span><br/>
+          Latency: ${pin.latency || "--"} ms<br/>
+          ${pin.type || "WiFi"}<br/>
+          <span style="color:#aaa; font-size:10px">${new Date(pin.timestamp || pin.created_at).toLocaleString()}</span>
+        </div>
+      `);
+    });
+  }
 
   // Update count
   const totalCount = new Set(

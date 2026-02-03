@@ -189,15 +189,17 @@ body {
 }
 
 /* ===== GUIDE ARROW (Agent Navigation) ===== */
+/* ===== GUIDE ARROW (Agent Navigation) ===== */
 .guide-arrow {
   position: absolute;
-  top: 50%;
+  bottom: 25%;
   left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 64px;
+  /* Transform is handled in JS for rotation */
+  font-size: 80px;
   color: var(--primary);
-  opacity: 0.8;
+  opacity: 0.9;
   z-index: 15;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.5));
 }
 
 .guide-text {
@@ -364,19 +366,33 @@ body {
   top: 10px;
   right: 10px;
   z-index: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 4px 8px;
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
 }
 
 .filter-select {
-  background: white;
+  background: white !important;
   border: 1px solid var(--border-subtle);
   padding: 6px 12px;
   border-radius: 8px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #000000 !important; /* Force Black */
   box-shadow: var(--shadow-sm);
   outline: none;
   min-width: 120px;
+  -webkit-appearance: none; /* Fix for iOS */
+  appearance: none;
+}
+
+.filter-select option {
+  background: white !important;
+  color: #000000 !important;
 }
 
 .location-info {
