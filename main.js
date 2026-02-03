@@ -1,3 +1,6 @@
+// API base URL - works on both localhost and deployed servers
+const API_BASE = window.location.origin;
+
 // AR Camera and Pin System
 const videoEl = document.getElementById("camera-viewport");
 const arOverlay = document.getElementById("ar-overlay");
@@ -68,7 +71,7 @@ const autoTrackNetworkData = async () => {
     const stats = await getCurrentNetworkStats();
 
     // Save to backend
-    await fetch("http://localhost:5000/api/save-reading", {
+    await fetch(`${API_BASE}/api/save-reading`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -138,7 +141,7 @@ const getSignalColor = (signal) => {
 
 // Get network statistics from server
 const getCurrentNetworkStats = async () => {
-  const response = await fetch("http://localhost:5000/api/wifi-stats");
+  const response = await fetch(`${API_BASE}/api/wifi-stats`);
   if (!response.ok) {
     throw new Error("Server error");
   }
