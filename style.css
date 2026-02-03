@@ -358,27 +358,79 @@ body {
   display: none;
 }
 
+/* Map Controls */
+.map-controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 500;
+}
+
+.filter-select {
+  background: white;
+  border: 1px solid var(--border-subtle);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+  outline: none;
+  min-width: 120px;
+}
+
 .location-info {
   position: absolute;
-  bottom: 16px;
-  left: 16px;
+  bottom: 10px;
+  left: 10px;
   display: flex;
-  gap: 20px;
-  background: white;
-  padding: 10px 16px;
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 6px 12px;
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
   z-index: 500;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .location-info span {
-  color: #64748b;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .location-info b {
+  color: var(--text-primary);
   font-weight: 600;
-  color: #0f172a;
+}
+
+/* ===== PROVIDER CARD ===== */
+.provider-card {
+  width: 100%;
+  max-width: 500px;
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: var(--shadow-md);
+  text-align: center;
+}
+
+.provider-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #94a3b8;
+  display: block;
+  margin-bottom: 4px;
+}
+
+#current-provider {
+  margin: 0;
+  color: white;
+  font-size: 18px;
+  font-weight: 600;
 }
 
 /* ===== ANIMATIONS - Clean & Simple ===== */

@@ -34,7 +34,6 @@
     <div class="main-container">
       <!-- Hero Section -->
       <header class="hero">
-        <div class="hero-icon">📡</div>
         <h1 class="hero-title">Wi-Fi Vision</h1>
         <p class="hero-tagline">
           Map your signal strength in augmented reality
@@ -81,11 +80,25 @@
       <!-- Map Section -->
       <div class="map-section">
         <div id="map"></div>
-        <div class="location-info">
-          <span>📍 Readings: <b id="pin-count">0</b></span>
-          <span>📡 Acc: <b id="accuracy">--</b>m</span>
-          <span>☁️ <b id="cloud-status">Syncing...</b></span>
+
+        <!-- ISP Filter Controls -->
+        <div class="map-controls">
+          <select id="isp-filter" class="filter-select">
+            <option value="all">All Providers</option>
+          </select>
         </div>
+
+        <div class="location-info">
+          <span>📍 <b id="pin-count">0</b></span>
+          <span>📡 <b id="accuracy">--</b>m</span>
+          <span>☁️ <b id="cloud-status">Syncing</b></span>
+        </div>
+      </div>
+
+      <!-- Provider Info Card -->
+      <div class="provider-card">
+        <span class="provider-label">Connected Provider</span>
+        <h3 id="current-provider">Detecting...</h3>
       </div>
     </div>
 

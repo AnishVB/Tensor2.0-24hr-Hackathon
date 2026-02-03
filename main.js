@@ -24,8 +24,9 @@ let userLocation = null; // { lat, lon, accuracy }
 let smoothedLocation = null; // Kalman-filtered location
 let lastAutoPinLocation = null; // Last location where we auto-dropped a pin
 let deviceHeading = 0; // Compass heading (0-360)
-let currentStats = { signal: -100, latency: 999 };
+let currentStats = { signal: -100, latency: 999, provider: "Unknown" };
 let lastCloudSync = 0; // Timestamp of last cloud sync
+let currentFilter = "all"; // all, wifi, cellular
 
 // Track existing signal box elements by pin index (for AR rendering)
 const signalBoxElements = new Map();
@@ -88,6 +89,7 @@ const init = async () => {
   startCamera();
   initMap();
   loadPins(); // Load from LocalStorage
+  fetchISP(); // Detect Provider
 
   // Start Sensors
   startLocationTracking();
@@ -116,6 +118,8 @@ const syncToCloud = async (pin) => {
       lon: pin.lon,
       signal: pin.signal,
       latency: pin.latency || 0,
+      type: pin.type || "WiFi", // Upload type
+      provider: pin.provider || "Unknown", // Upload ISP
     });
 
     if (error) {
@@ -142,7 +146,7 @@ const fetchNearbyReadings = async () => {
 
     const { data, error } = await sb
       .from("wifi_readings")
-      .select("lat, lon, signal, latency, created_at")
+      .select("lat, lon, signal, latency, type, created_at")
       .gte("lat", smoothedLocation.lat - latDelta)
       .lte("lat", smoothedLocation.lat + latDelta)
       .gte("lon", smoothedLocation.lon - lonDelta)
@@ -174,6 +178,7 @@ const syncCloudData = async () => {
       lon: r.lon,
       signal: r.signal,
       latency: r.latency,
+      type: r.type || "WiFi",
     }));
 
     // Update heatmap with cloud data
@@ -189,26 +194,6 @@ const syncCloudData = async () => {
 };
 
 // Update heatmap to include cloud data
-const updateHeatmapWithCloudData = () => {
-  if (!heatLayer || !map) return;
-
-  // Combine local and cloud pins for heatmap
-  const allPins = [...pins, ...cloudPins];
-
-  const heatData = allPins.map((pin) => [
-    pin.lat,
-    pin.lon,
-    signalToIntensity(pin.signal),
-  ]);
-
-  heatLayer.setLatLngs(heatData);
-
-  // Update community pin count
-  const totalCount = new Set(
-    allPins.map((p) => `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`),
-  ).size;
-  document.getElementById("pin-count").textContent = totalCount;
-};
 
 const loadPins = () => {
   const saved = localStorage.getItem("wifi_vision_pins");
@@ -238,6 +223,25 @@ const measureLatency = async () => {
     return Math.min(latency, 999); // Cap at 999ms
   } catch {
     return null;
+  }
+};
+
+// Fetch ISP Name using ipapi.co
+const fetchISP = async () => {
+  try {
+    const response = await fetch("https://ipapi.co/json/");
+    if (response.ok) {
+      const data = await response.json();
+      if (data.org) {
+        console.log("ISP Detected:", data.org);
+        currentStats.provider = data.org;
+        // Update UI
+        const providerEl = document.getElementById("current-provider");
+        if (providerEl) providerEl.textContent = data.org;
+      }
+    }
+  } catch (e) {
+    console.warn("ISP Fetch failed", e);
   }
 };
 
@@ -304,11 +308,15 @@ const updateNetworkStats = async () => {
     // Measure real latency
     const latency = await measureLatency();
 
+    // Preserve provider if already fetched
+    const existingProvider = currentStats.provider || "Unknown";
+
     currentStats = {
       signal: connInfo.signal,
       latency: latency || connInfo.rtt || 50,
       connection: connInfo.type,
       effectiveType: connInfo.effectiveType,
+      provider: existingProvider,
     };
 
     // Update HUD
@@ -336,6 +344,8 @@ const dropPin = () => {
     lon: smoothedLocation.lon,
     signal: currentStats.signal,
     latency: currentStats.latency,
+    type: currentStats.connection, // WiFi or Cellular
+    provider: currentStats.provider, // ISP Name
     timestamp: Date.now(),
   };
 
@@ -430,15 +440,20 @@ const renderAR = () => {
       el.style.left = `${screenX}%`;
 
       // 8. Scale by distance (Pseudo-3D)
-      const scale = Math.max(0.6, 1 - dist / MAX_Render_DIST);
-      el.style.top = `${40 + dist * 1.5}%`;
+      // Standard perspective: things get smaller as they get further
+      const scale = Math.max(0.4, 1 - (dist / MAX_Render_DIST) * 0.8);
+
+      // Vertical position: simple horizon line for stability
+      // Since we don't track phone tilt (pitch), we keep them at eye-level horizon
+      el.style.top = `50%`;
+
       el.style.transform = `translate(-50%, -50%) scale(${scale})`;
       el.style.zIndex = Math.floor(100 - dist);
 
       el.innerHTML = `
-        <div>#${index + 1}</div>
+        <div style="font-size: 10px; opacity: 0.8">${pin.provider || "Unknown"}</div>
         <div class="box-dist">${dist.toFixed(1)}m</div>
-        <div style="color: ${color}">${pin.signal}dBm</div>
+        <div style="color: ${color}; font-weight: bold">${pin.signal}dBm</div>
       `;
     }
   });
@@ -496,6 +511,8 @@ const autoDropPin = () => {
     lon: smoothedLocation.lon,
     signal: currentStats.signal,
     latency: currentStats.latency,
+    type: currentStats.connection, // WiFi or Cellular
+    provider: currentStats.provider, // ISP Name
     timestamp: Date.now(),
     auto: true, // Mark as auto-dropped
   };
@@ -622,19 +639,39 @@ const startLocationTracking = () => {
 };
 
 const startCompass = () => {
-  // iOS Permission Check
+  // iOS Permission Check (handled lazily if needed)
   if (typeof DeviceOrientationEvent.requestPermission === "function") {
-    // Need a button click to trigger this on iOS, usually handled in init UI
+    // Note: This must be triggered by user interaction usually
   }
 
-  window.addEventListener("deviceorientation", (e) => {
-    // Android (alpha is compass) vs iOS (webkitCompassHeading)
+  // Handler for device orientation
+  const handleOrientation = (e) => {
+    let heading = 0;
+
     if (e.webkitCompassHeading) {
-      deviceHeading = e.webkitCompassHeading;
-    } else if (e.alpha) {
-      deviceHeading = 360 - e.alpha; // Android is counter-clockwise
+      // iOS - direct magnetic heading
+      heading = e.webkitCompassHeading;
+    } else if (e.alpha !== null) {
+      // Android
+      if (e.absolute === true || e.absolute === undefined) {
+        // deviceorientationabsolute or standard absolute
+        heading = 360 - e.alpha;
+      } else {
+        // relative orientation - best guess
+        heading = 360 - e.alpha;
+      }
     }
-  });
+
+    // Simple smoothing could be added here if needed
+    deviceHeading = heading;
+  };
+
+  // Try to use absolute orientation first (Chrome Android)
+  if ("ondeviceorientationabsolute" in window) {
+    window.addEventListener("deviceorientationabsolute", handleOrientation);
+  } else {
+    window.addEventListener("deviceorientation", handleOrientation);
+  }
 };
 
 // Haversine Distance
@@ -742,6 +779,61 @@ const initMap = () => {
       1.0: "#00ff88", // Excellent - mint
     },
   }).addTo(map);
+
+  // Initialize Map Controls
+  const ispFilter = document.getElementById("isp-filter");
+  if (ispFilter) {
+    ispFilter.addEventListener("change", (e) => {
+      currentFilter = e.target.value;
+      updateHeatmapWithCloudData(false); // Don't repopulate dropdown to avoid loop
+    });
+  }
+};
+
+// Update heatmap to include cloud data (and populate filter options)
+const updateHeatmapWithCloudData = (populateOptions = true) => {
+  if (!heatLayer || !map) return;
+
+  // Combine local and cloud pins
+  const allPins = [...pins, ...cloudPins];
+
+  if (populateOptions) {
+    const providers = new Set(allPins.map((p) => p.provider || "Unknown"));
+    const select = document.getElementById("isp-filter");
+    if (select) {
+      // Keep "All Providers" and current selection
+      const current = select.value;
+      select.innerHTML = '<option value="all">All Providers</option>';
+
+      providers.forEach((p) => {
+        const opt = document.createElement("option");
+        opt.value = p;
+        opt.textContent = p;
+        select.appendChild(opt);
+      });
+      select.value = current;
+    }
+  }
+
+  // Filter based on selection
+  const filteredPins = allPins.filter((pin) => {
+    if (currentFilter === "all") return true;
+    return (pin.provider || "Unknown") === currentFilter;
+  });
+
+  const heatData = filteredPins.map((pin) => [
+    pin.lat,
+    pin.lon,
+    signalToIntensity(pin.signal),
+  ]);
+
+  heatLayer.setLatLngs(heatData);
+
+  // Update count
+  const totalCount = new Set(
+    filteredPins.map((p) => `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`),
+  ).size;
+  document.getElementById("pin-count").textContent = totalCount;
 };
 
 // Convert signal dBm to heatmap intensity (0-1)
