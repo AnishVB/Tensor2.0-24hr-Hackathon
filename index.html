@@ -4,12 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
-    />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta
-      name="apple-mobile-web-app-status-bar-style"
-      content="black-translucent"
+      content="width=device-width, initial-scale=1.0, user-scalable=no"
     />
     <title>WiFi Vision AR</title>
     <link rel="stylesheet" href="style.css" />
@@ -21,115 +16,44 @@
   <body>
     <div class="main-container">
       <div class="ar-section">
-        <div class="header">
-          <h1>WiFi Vision AR</h1>
-          <button
-            id="toggle-camera-btn"
-            class="camera-toggle-btn"
-            title="Switch Camera"
-          >
-            <span class="camera-icon">📷</span>
-          </button>
-        </div>
+        <video id="camera-viewport" autoplay playsinline muted></video>
 
-        <div class="viewport-container">
-          <video id="camera-viewport" autoplay playsinline muted></video>
-          <div id="ar-overlay">
-            <div class="data-overlay">
-              <div id="stats-display" class="stats-display">
-                <div class="stat-row">
-                  <span class="stat-key">Signal:</span>
-                  <span class="stat-val" id="overlay-signal">--</span>
-                </div>
-                <div class="stat-row">
-                  <span class="stat-key">Latency:</span>
-                  <span class="stat-val" id="overlay-latency">--</span>
-                </div>
-                <div class="stat-row">
-                  <span class="stat-key">Bandwidth:</span>
-                  <span class="stat-val" id="overlay-bandwidth">--</span>
-                </div>
-                <div class="stat-row">
-                  <span class="stat-key">Quality:</span>
-                  <span class="stat-val" id="overlay-quality">--</span>
-                </div>
-              </div>
-              <div id="signal-boxes"></div>
+        <div id="ar-overlay">
+          <div id="guide-arrow" class="guide-arrow" style="display: none">
+            ⬆
+          </div>
+          <div id="guide-text" class="guide-text"></div>
+
+          <div class="stats-display">
+            <div class="stat-row">
+              <span class="stat-key">Signal</span>
+              <span class="stat-val" id="overlay-signal">-- dBm</span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-key">Latency</span>
+              <span class="stat-val" id="overlay-latency">-- ms</span>
             </div>
           </div>
+
+          <div id="signal-boxes"></div>
         </div>
 
         <div class="control-panel">
-          <button id="drop-pin-btn" class="btn btn-primary">📍 Pin</button>
-          <button id="clear-pins-btn" class="btn btn-danger">🗑️ Clear</button>
-          <button id="toggle-map-btn" class="btn btn-secondary">🗺️ Map</button>
-        </div>
-
-        <div class="network-stats-card">
-          <h3>Current Stats</h3>
-          <div class="stats-grid">
-            <div class="stat-item">
-              <span class="stat-label">Bandwidth</span>
-              <span class="stat-value" id="bandwidth">-- Mbps</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">Latency</span>
-              <span class="stat-value" id="latency">-- ms</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">Signal</span>
-              <span class="stat-value" id="signal">-- dBm</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">Connection</span>
-              <span class="stat-value" id="connection">--</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="network-stats-card">
-          <h3>Auto-Tracking</h3>
-          <div class="stats-grid">
-            <div class="stat-item">
-              <span class="stat-label">Tracked</span>
-              <span class="stat-value" id="tracked-count">0</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">Distance</span>
-              <span class="stat-value" id="distance-traveled">0 m</span>
-            </div>
-          </div>
+          <button id="drop-pin-btn" class="btn btn-primary">📍 PIN</button>
+          <button id="clear-pins-btn" class="btn btn-danger">🗑️ RESET</button>
         </div>
       </div>
 
       <div class="map-section">
-        <h2>Location Map</h2>
-        <div id="map-container">
-          <div id="map"></div>
-        </div>
+        <div id="map"></div>
         <div class="location-info">
-          <div class="info-item">
-            <span class="info-label">Lat:</span>
-            <span class="info-value" id="lat">--</span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">Lon:</span>
-            <span class="info-value" id="lon">--</span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">Accuracy:</span>
-            <span class="info-value" id="accuracy">--</span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">Pins:</span>
-            <span class="info-value" id="pin-count">0</span>
-          </div>
+          <span>Pins: <b id="pin-count">0</b></span>
+          <span>Acc: <b id="accuracy">--</b>m</span>
         </div>
       </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/simplesimpleheat/dist/simpleheat.js"></script>
     <script src="main.js"></script>
   </body>
 </html>
