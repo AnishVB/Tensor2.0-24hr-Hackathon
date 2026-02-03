@@ -287,6 +287,13 @@ const dropPin = async () => {
     console.error("Drop pin error:", error);
     alert("Failed to drop pin: " + error.message);
   }
+};
+
+// Update network stats display
+const updateNetworkStats = (stats) => {
+  document.getElementById("bandwidth").textContent = stats.bandwidth + " Mbps";
+  document.getElementById("latency").textContent = stats.latency + " ms";
+  document.getElementById("signal").textContent = stats.signal + " dBm";
   document.getElementById("connection").textContent = stats.connection;
 };
 
